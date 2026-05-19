@@ -74,16 +74,16 @@ const RecordingOverlay: React.FC = () => {
       };
     };
 
-  let cleanup: (() => void) | undefined;
+    let cleanup: (() => void) | undefined;
 
-  setupEventListeners().then((fn) => {
-    cleanup = fn;
-  });
+    setupEventListeners().then((fn) => {
+      cleanup = fn;
+    });
 
-  return () => {
-    cleanup?.();
-  };
-}, []);
+    return () => {
+      cleanup?.();
+    };
+  }, []);
 
   const getIcon = () => {
     if (state === "recording") {
@@ -137,9 +137,7 @@ const RecordingOverlay: React.FC = () => {
         )}
       </div>
 
-      {lastSegment && (
-        <div className="segment-preview">{lastSegment}</div>
-      )}
+      {lastSegment && <div className="segment-preview">{lastSegment}</div>}
     </div>
   );
 };
