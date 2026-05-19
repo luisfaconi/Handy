@@ -20,6 +20,8 @@ const RecordingOverlay: React.FC = () => {
   const [levels, setLevels] = useState<number[]>(Array(16).fill(0));
   const smoothedLevelsRef = useRef<number[]>(Array(16).fill(0));
   const direction = getLanguageDirection(i18n.language);
+  const [lastSegment, setLastSegment] = useState<string | null>(null);
+  const segmentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const setupEventListeners = async () => {
@@ -51,11 +53,24 @@ const RecordingOverlay: React.FC = () => {
         setLevels(smoothed.slice(0, 9));
       });
 
+      // Listen for meeting segment transcribed events
+      const unlistenSegment = await listen<{
+        text: string;
+        timestamp: string;
+        index: number;
+      }>("meeting-segment-transcribed", (event) => {
+        setLastSegment(event.payload.text);
+        if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
+        segmentTimerRef.current = setTimeout(() => setLastSegment(null), 3000);
+      });
+
       // Cleanup function
       return () => {
         unlistenShow();
         unlistenHide();
         unlistenLevel();
+        unlistenSegment();
+        if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
       };
     };
 
@@ -73,7 +88,7 @@ const RecordingOverlay: React.FC = () => {
   return (
     <div
       dir={direction}
-      className={`recording-overlay ${isVisible ? "fade-in" : ""}`}
+      className={`recording-overlay ${isVisible ? "fade-in" : ""} ${lastSegment ? "has-segment" : ""}`}
     >
       <div className="overlay-left">{getIcon()}</div>
 
@@ -113,6 +128,10 @@ const RecordingOverlay: React.FC = () => {
           </div>
         )}
       </div>
+
+      {lastSegment && (
+        <div className="segment-preview">{lastSegment}</div>
+      )}
     </div>
   );
 };
