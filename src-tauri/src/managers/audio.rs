@@ -601,7 +601,8 @@ impl AudioRecordingManager {
         }
         *self.transcript_path.lock().unwrap() = Some(path.clone());
 
-        // Create bounded channel for audio chunks (8 slots = ~4 minutes of buffered work)
+        // Create bounded channel for audio chunks
+        // 8 slots ≈ ~30-40 seconds of speech backlog at typical VAD chunk sizes
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(8);
 
         // Register the segment callback on the recorder
@@ -609,6 +610,8 @@ impl AudioRecordingManager {
             let recorder = self.recorder.lock().unwrap();
             if let Some(r) = recorder.as_ref() {
                 r.set_meeting_tx(Some(tx.clone()));
+            } else {
+                log::warn!("Meeting mode: recorder not available, segment dispatch disabled");
             }
         }
         *self.meeting_chunk_tx.lock().unwrap() = Some(tx);
@@ -617,10 +620,8 @@ impl AudioRecordingManager {
         let app_handle = self.app_handle.clone();
         let segments_arc = self.meeting_segments.clone();
         let worker = std::thread::spawn(move || {
-            use std::io::Write as IoWrite;
-
             let tm = match app_handle.try_state::<std::sync::Arc<crate::managers::transcription::TranscriptionManager>>() {
-                Some(s) => s.inner().clone(),
+                Some(s) => (*s).clone(),
                 None => {
                     error!("Meeting mode worker: TranscriptionManager not available");
                     return;
