@@ -3,8 +3,6 @@ use crate::helpers::clamshell;
 use crate::settings::{get_settings, AppSettings};
 use crate::utils;
 use log::{debug, error, info};
-use std::fs::OpenOptions;
-use std::io::{BufWriter, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
