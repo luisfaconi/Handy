@@ -6,7 +6,7 @@ use log::{debug, error, info};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg(target_os = "windows")]
 #[derive(Clone, serde::Serialize)]

@@ -556,18 +556,24 @@ fn run_consumer(
                 return;
             }
 
-            let vad_result = if let Some(vad_arc) = &vad {
+            // Resolve VAD result to owned data before the MutexGuard drops.
+            // VadFrame::Speech borrows from `det`; converting to Option<Vec<f32>>
+            // avoids the lifetime escaping past the lock scope.
+            let speech_buf: Option<Vec<f32>> = if let Some(vad_arc) = &vad {
                 let mut det = vad_arc.lock().unwrap();
-                det.push_frame(frame).unwrap_or(VadFrame::Speech(frame))
+                match det.push_frame(frame).unwrap_or(VadFrame::Speech(frame)) {
+                    VadFrame::Speech(buf) => Some(buf.to_vec()),
+                    VadFrame::Noise => None,
+                }
             } else {
-                VadFrame::Speech(frame)
+                Some(frame.to_vec())
             };
 
-            match vad_result {
-                VadFrame::Speech(buf) => {
+            match speech_buf {
+                Some(buf) => {
                     if meeting_tx.is_some() {
                         // Meeting mode: accumulate in speech_buffer, not processed_samples
-                        speech_buffer.extend_from_slice(buf);
+                        speech_buffer.extend_from_slice(&buf);
                         was_speech = true;
                         // Force boundary every 30s to bound memory and guarantee progress
                         if speech_buffer.len() >= MAX_SEGMENT_SAMPLES {
@@ -581,10 +587,11 @@ fn run_consumer(
                         }
                     } else {
                         // Normal mode: accumulate in processed_samples
-                        processed_samples.extend_from_slice(buf);
+                        processed_samples.extend_from_slice(&buf);
                     }
                 }
-                VadFrame::Noise => {
+                None => {
+                    // Noise frame
                     if meeting_tx.is_some() {
                         // Detect speech→noise transition: emit the completed segment
                         if was_speech && !speech_buffer.is_empty() {
