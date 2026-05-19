@@ -3,10 +3,20 @@ use crate::helpers::clamshell;
 use crate::settings::{get_settings, AppSettings};
 use crate::utils;
 use log::{debug, error, info};
+use std::fs::OpenOptions;
+use std::io::{BufWriter, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::Manager;
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, serde::Serialize)]
+pub struct MeetingSegmentEvent {
+    pub text: String,
+    pub timestamp: String, // "[HH:MM:SS]"
+    pub index: u32,
+}
 
 const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -163,6 +173,12 @@ pub struct AudioRecordingManager {
     meeting_segments: Arc<Mutex<Vec<(chrono::DateTime<chrono::Local>, String)>>>,
     #[cfg(target_os = "windows")]
     meeting_start_time: Arc<Mutex<Option<chrono::DateTime<chrono::Local>>>>,
+    #[cfg(target_os = "windows")]
+    meeting_chunk_tx: Arc<Mutex<Option<mpsc::SyncSender<Vec<f32>>>>>,
+    #[cfg(target_os = "windows")]
+    meeting_worker_handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
+    #[cfg(target_os = "windows")]
+    transcript_path: Arc<Mutex<Option<std::path::PathBuf>>>,
 }
 
 impl AudioRecordingManager {
@@ -195,6 +211,12 @@ impl AudioRecordingManager {
             meeting_segments: Arc::new(Mutex::new(Vec::new())),
             #[cfg(target_os = "windows")]
             meeting_start_time: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "windows")]
+            meeting_chunk_tx: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "windows")]
+            meeting_worker_handle: Arc::new(Mutex::new(None)),
+            #[cfg(target_os = "windows")]
+            transcript_path: Arc::new(Mutex::new(None)),
         };
 
         // Always-on?  Open immediately.
