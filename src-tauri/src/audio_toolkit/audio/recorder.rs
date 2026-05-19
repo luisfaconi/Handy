@@ -23,6 +23,7 @@ enum Cmd {
     Start,
     Stop(mpsc::Sender<Vec<f32>>),
     Shutdown,
+    SetMeetingTx(Option<mpsc::SyncSender<Vec<f32>>>), // enable/disable VAD chunk dispatch
 }
 
 enum AudioChunk {
@@ -60,6 +61,14 @@ impl AudioRecorder {
     {
         self.level_cb = Some(Arc::new(cb));
         self
+    }
+
+    /// Enable or disable VAD-driven segment dispatch for meeting mode.
+    /// Pass `Some(tx)` to activate; `None` to deactivate.
+    pub fn set_meeting_tx(&self, tx: Option<mpsc::SyncSender<Vec<f32>>>) {
+        if let Some(cmd_tx) = &self.cmd_tx {
+            let _ = cmd_tx.send(Cmd::SetMeetingTx(tx));
+        }
     }
 
     pub fn open(&mut self, device: Option<Device>) -> Result<(), Box<dyn std::error::Error>> {
@@ -512,6 +521,9 @@ fn run_consumer(
                 Cmd::Shutdown => {
                     stop_flag.store(true, Ordering::Relaxed);
                     return;
+                }
+                Cmd::SetMeetingTx(_) => {
+                    // Handled in Task 2; variant accepted here to keep the match exhaustive.
                 }
             }
         }
