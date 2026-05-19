@@ -607,13 +607,6 @@ impl ShortcutAction for TranscribeAction {
                                 let paste_time = Instant::now();
                                 let final_text = processed.final_text;
 
-                                #[cfg(target_os = "windows")]
-                                if !final_text.is_empty() {
-                                    if let Some(rm) = ah.try_state::<Arc<AudioRecordingManager>>() {
-                                        rm.add_meeting_segment(final_text.clone());
-                                    }
-                                }
-
                                 ah.run_on_main_thread(move || {
                                     match utils::paste(final_text, ah_clone.clone()) {
                                         Ok(()) => debug!(

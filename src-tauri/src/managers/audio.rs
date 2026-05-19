@@ -687,6 +687,7 @@ impl AudioRecordingManager {
         *meeting = false;
         drop(meeting);
 
+        // Stop loopback recorder (unchanged)
         {
             let mut guard = self.loopback_recorder.lock().unwrap();
             if let Some(ref mut rec) = *guard {
@@ -695,29 +696,56 @@ impl AudioRecordingManager {
             *guard = None;
         }
 
-        let segments = std::mem::take(&mut *self.meeting_segments.lock().unwrap());
-        let start_time = self.meeting_start_time.lock().unwrap().take();
+        // Disconnect the segment callback on the recorder (stops new chunks arriving)
+        {
+            let recorder = self.recorder.lock().unwrap();
+            if let Some(r) = recorder.as_ref() {
+                r.set_meeting_tx(None);
+            }
+        }
 
+        // Close the sender — this signals the worker to drain and exit
+        *self.meeting_chunk_tx.lock().unwrap() = None;
+
+        // Wait for the worker to finish (drains queue, writes all pending segments)
+        if let Some(handle) = self.meeting_worker_handle.lock().unwrap().take() {
+            if let Err(e) = handle.join() {
+                error!("Meeting mode worker panicked: {:?}", e);
+            }
+        }
+
+        // Retrieve state for finalization
+        let segments = self.meeting_segments.lock().unwrap().clone();
+        let start_time = self.meeting_start_time.lock().unwrap().take();
+        let path = self.transcript_path.lock().unwrap().take();
+
+        // Nothing transcribed: don't report a file path
         if segments.is_empty() {
             return Ok(None);
         }
 
+        let path = match path {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+
+        // Append duration footer to the file
         let start = start_time.unwrap_or_else(chrono::Local::now);
         let end = chrono::Local::now();
         let duration = end.signed_duration_since(start);
-        let file_path = write_meeting_transcript(&self.app_handle, start, duration, &segments)?;
-        Ok(Some(file_path))
-    }
+        let hours = duration.num_hours().abs();
+        let minutes = (duration.num_minutes() % 60).abs();
+        let seconds = (duration.num_seconds() % 60).abs();
 
-    #[cfg(target_os = "windows")]
-    pub fn add_meeting_segment(&self, text: String) {
-        if !*self.meeting_mode.lock().unwrap() {
-            return;
+        if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&path) {
+            use std::io::Write;
+            let mut f = file;
+            let _ = writeln!(f);
+            let _ = writeln!(f, "Duration: {:02}:{:02}:{:02}", hours, minutes, seconds);
         }
-        self.meeting_segments
-            .lock()
-            .unwrap()
-            .push((chrono::Local::now(), text));
+
+        info!("Meeting transcript saved to: {}", path.display());
+        Ok(Some(path.to_string_lossy().to_string()))
     }
 
     #[cfg(target_os = "windows")]
@@ -775,44 +803,3 @@ fn resolve_transcript_path(
     Ok(meetings_dir.join(filename))
 }
 
-#[cfg(target_os = "windows")]
-fn write_meeting_transcript(
-    app: &tauri::AppHandle,
-    start: chrono::DateTime<chrono::Local>,
-    duration: chrono::Duration,
-    segments: &[(chrono::DateTime<chrono::Local>, String)],
-) -> Result<String, anyhow::Error> {
-    let docs_dir = app
-        .path()
-        .document_dir()
-        .map_err(|e| anyhow::anyhow!("Failed to resolve Documents directory: {e}"))?;
-
-    let meetings_dir = docs_dir.join("Handy").join("meetings");
-    std::fs::create_dir_all(&meetings_dir)
-        .map_err(|e| anyhow::anyhow!("Failed to create meetings directory: {e}"))?;
-
-    let filename = format!("meeting_{}.txt", start.format("%Y-%m-%d_%H-%M-%S"));
-    let file_path = meetings_dir.join(&filename);
-
-    let hours = duration.num_hours().abs();
-    let minutes = (duration.num_minutes() % 60).abs();
-    let seconds = (duration.num_seconds() % 60).abs();
-
-    let mut content = format!(
-        "Meeting: {}\nDuration: {:02}:{:02}:{:02}\n\n",
-        start.format("%Y-%m-%d %H:%M"),
-        hours,
-        minutes,
-        seconds
-    );
-
-    for (time, text) in segments {
-        content.push_str(&format!("[{}] {}\n", time.format("%H:%M:%S"), text));
-    }
-
-    std::fs::write(&file_path, &content)
-        .map_err(|e| anyhow::anyhow!("Failed to write transcript file: {e}"))?;
-
-    info!("Meeting transcript saved to: {}", file_path.display());
-    Ok(file_path.to_string_lossy().to_string())
-}
