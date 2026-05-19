@@ -74,8 +74,16 @@ const RecordingOverlay: React.FC = () => {
       };
     };
 
-    setupEventListeners();
-  }, []);
+  let cleanup: (() => void) | undefined;
+
+  setupEventListeners().then((fn) => {
+    cleanup = fn;
+  });
+
+  return () => {
+    cleanup?.();
+  };
+}, []);
 
   const getIcon = () => {
     if (state === "recording") {
@@ -88,7 +96,7 @@ const RecordingOverlay: React.FC = () => {
   return (
     <div
       dir={direction}
-      className={`recording-overlay ${isVisible ? "fade-in" : ""} ${lastSegment ? "has-segment" : ""}`}
+      className={`recording-overlay ${isVisible ? "fade-in" : ""} ${isVisible && lastSegment ? "has-segment" : ""}`}
     >
       <div className="overlay-left">{getIcon()}</div>
 
