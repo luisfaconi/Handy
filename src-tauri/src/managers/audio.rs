@@ -527,7 +527,8 @@ impl AudioRecordingManager {
 
                 #[cfg(target_os = "windows")]
                 let samples = {
-                    if *self.meeting_mode.lock().unwrap() {
+                    let in_meeting_mode = *self.meeting_mode.lock().unwrap();
+                    if !in_meeting_mode {
                         let loopback_samples = {
                             let guard = self.loopback_recorder.lock().unwrap();
                             if let Some(ref rec) = *guard {
