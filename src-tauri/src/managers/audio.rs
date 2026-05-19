@@ -363,6 +363,24 @@ impl AudioRecordingManager {
             rec.open(selected_device)
                 .map_err(|e| anyhow::anyhow!("Failed to open recorder: {}", e))?;
         }
+        drop(recorder_opt);
+
+        // If meeting mode was activated before this stream opened (OnDemand path),
+        // the recorder's cmd_tx didn't exist yet so set_meeting_tx was a no-op.
+        // Now that open() has run and cmd_tx exists, register the sender.
+        #[cfg(target_os = "windows")]
+        {
+            let meeting_active = *self.meeting_mode.lock().unwrap();
+            if meeting_active {
+                let tx = self.meeting_chunk_tx.lock().unwrap().clone();
+                if let Some(tx) = tx {
+                    let recorder_opt = self.recorder.lock().unwrap();
+                    if let Some(rec) = recorder_opt.as_ref() {
+                        rec.set_meeting_tx(Some(tx));
+                    }
+                }
+            }
+        }
 
         *open_flag = true;
         // This timing covers through cpal's stream.play() returning — i.e. the
