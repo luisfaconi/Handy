@@ -399,6 +399,68 @@ mod tests {
         assert!(!is_no_input_device_error("permission denied"));
         assert!(!is_no_input_device_error("device not found"));
     }
+
+    #[test]
+    fn speech_to_noise_transition_emits_chunk() {
+        use std::sync::mpsc;
+
+        // Simulate: run_consumer state variables
+        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(8);
+        let mut meeting_tx: Option<mpsc::SyncSender<Vec<f32>>> = Some(tx);
+        let mut speech_buffer: Vec<f32> = Vec::new();
+        let mut was_speech: bool = false;
+
+        // Simulate speech frame arriving
+        let speech_samples = vec![0.1f32; 100];
+        if meeting_tx.is_some() {
+            speech_buffer.extend_from_slice(&speech_samples);
+            was_speech = true;
+        }
+
+        // Simulate noise frame arriving (transition)
+        if meeting_tx.is_some() && was_speech && !speech_buffer.is_empty() {
+            if let Some(ref t) = meeting_tx {
+                let chunk = std::mem::take(&mut speech_buffer);
+                t.try_send(chunk).unwrap();
+            }
+            was_speech = false;
+        }
+
+        let received = rx.try_recv().unwrap();
+        assert_eq!(received.len(), 100);
+        assert!(speech_buffer.is_empty());
+        assert!(!was_speech);
+    }
+
+    #[test]
+    fn forced_30s_boundary_emits_chunk() {
+        use std::sync::mpsc;
+
+        let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(8);
+        let mut meeting_tx: Option<mpsc::SyncSender<Vec<f32>>> = Some(tx);
+        let mut speech_buffer: Vec<f32> = Vec::new();
+        let mut was_speech: bool = false;
+        const MAX_SEGMENT_SAMPLES: usize = 16_000 * 30;
+
+        // Fill buffer beyond 30s limit
+        let big_chunk = vec![0.2f32; MAX_SEGMENT_SAMPLES + 100];
+        if meeting_tx.is_some() {
+            speech_buffer.extend_from_slice(&big_chunk);
+            was_speech = true;
+            if speech_buffer.len() >= MAX_SEGMENT_SAMPLES {
+                if let Some(ref t) = meeting_tx {
+                    let chunk = std::mem::take(&mut speech_buffer);
+                    t.try_send(chunk).unwrap();
+                }
+                was_speech = false;
+            }
+        }
+
+        let received = rx.try_recv().unwrap();
+        assert!(received.len() >= MAX_SEGMENT_SAMPLES);
+        assert!(speech_buffer.is_empty());
+        assert!(!was_speech);
+    }
 }
 
 fn run_consumer(
@@ -417,6 +479,12 @@ fn run_consumer(
 
     let mut processed_samples = Vec::<f32>::new();
     let mut recording = false;
+
+    // Meeting mode: track VAD transitions and accumulate speech chunks
+    let mut meeting_tx: Option<mpsc::SyncSender<Vec<f32>>> = None;
+    let mut speech_buffer: Vec<f32> = Vec::new();
+    let mut was_speech: bool = false;
+    const MAX_SEGMENT_SAMPLES: usize = 16_000 * 30; // 30s at 16kHz
 
     // ---------- spectrum visualisation setup ---------------------------- //
     const BUCKETS: usize = 16;
@@ -470,7 +538,55 @@ fn run_consumer(
 
         // ---------- existing pipeline ------------------------------------ //
         frame_resampler.push(&raw, &mut |frame: &[f32]| {
-            handle_frame(frame, recording, &vad, &mut processed_samples)
+            if !recording {
+                return;
+            }
+
+            let vad_result = if let Some(vad_arc) = &vad {
+                let mut det = vad_arc.lock().unwrap();
+                det.push_frame(frame).unwrap_or(VadFrame::Speech(frame))
+            } else {
+                VadFrame::Speech(frame)
+            };
+
+            match vad_result {
+                VadFrame::Speech(buf) => {
+                    if meeting_tx.is_some() {
+                        // Meeting mode: accumulate in speech_buffer, not processed_samples
+                        speech_buffer.extend_from_slice(buf);
+                        was_speech = true;
+                        // Force boundary every 30s to bound memory and guarantee progress
+                        if speech_buffer.len() >= MAX_SEGMENT_SAMPLES {
+                            if let Some(ref tx) = meeting_tx {
+                                let chunk = std::mem::take(&mut speech_buffer);
+                                if tx.try_send(chunk).is_err() {
+                                    log::warn!("Meeting segment queue full, dropping 30s chunk");
+                                }
+                            }
+                            was_speech = false;
+                        }
+                    } else {
+                        // Normal mode: accumulate in processed_samples
+                        processed_samples.extend_from_slice(buf);
+                    }
+                }
+                VadFrame::Noise => {
+                    if meeting_tx.is_some() {
+                        // Detect speech→noise transition: emit the completed segment
+                        if was_speech && !speech_buffer.is_empty() {
+                            if let Some(ref tx) = meeting_tx {
+                                let chunk = std::mem::take(&mut speech_buffer);
+                                if tx.try_send(chunk).is_err() {
+                                    log::warn!(
+                                        "Meeting segment queue full, dropping VAD-boundary chunk"
+                                    );
+                                }
+                            }
+                        }
+                        was_speech = false;
+                    }
+                }
+            }
         });
 
         // non-blocking check for a command
@@ -479,6 +595,8 @@ fn run_consumer(
                 Cmd::Start => {
                     stop_flag.store(false, Ordering::Relaxed);
                     processed_samples.clear();
+                    speech_buffer.clear();
+                    was_speech = false;
                     recording = true;
                     visualizer.reset();
                     if let Some(v) = &vad {
@@ -497,7 +615,13 @@ fn run_consumer(
                         match sample_rx.recv_timeout(Duration::from_secs(2)) {
                             Ok(AudioChunk::Samples(remaining)) => {
                                 frame_resampler.push(&remaining, &mut |frame: &[f32]| {
-                                    handle_frame(frame, true, &vad, &mut processed_samples)
+                                    if meeting_tx.is_some() {
+                                        // Meeting mode: accumulate tail frames directly (VAD not needed at stop)
+                                        speech_buffer.extend_from_slice(frame);
+                                        was_speech = true;
+                                    } else {
+                                        handle_frame(frame, true, &vad, &mut processed_samples);
+                                    }
                                 });
                             }
                             Ok(AudioChunk::EndOfStream) => break,
@@ -509,10 +633,30 @@ fn run_consumer(
                     }
 
                     frame_resampler.finish(&mut |frame: &[f32]| {
-                        handle_frame(frame, true, &vad, &mut processed_samples)
+                        if meeting_tx.is_some() {
+                            // Meeting mode: accumulate tail frames directly (VAD not needed at stop)
+                            speech_buffer.extend_from_slice(frame);
+                            was_speech = true;
+                        } else {
+                            handle_frame(frame, true, &vad, &mut processed_samples);
+                        }
                     });
 
-                    let _ = reply_tx.send(std::mem::take(&mut processed_samples));
+                    // Meeting mode: flush any buffered tail, return empty Vec to caller
+                    // so actions.rs skips its normal transcription pass.
+                    if let Some(ref tx) = meeting_tx {
+                        if !speech_buffer.is_empty() {
+                            let chunk = std::mem::take(&mut speech_buffer);
+                            if tx.try_send(chunk).is_err() {
+                                log::warn!("Meeting segment queue full, dropping stop-flush chunk");
+                            }
+                        }
+                        was_speech = false;
+                        // Signal to caller: meeting mode consumed this recording
+                        let _ = reply_tx.send(Vec::new());
+                    } else {
+                        let _ = reply_tx.send(std::mem::take(&mut processed_samples));
+                    }
 
                     // Resume the audio callback so the consumer loop can continue
                     // receiving chunks (important for always-on microphone mode).
@@ -522,8 +666,10 @@ fn run_consumer(
                     stop_flag.store(true, Ordering::Relaxed);
                     return;
                 }
-                Cmd::SetMeetingTx(_) => {
-                    // Handled in Task 2; variant accepted here to keep the match exhaustive.
+                Cmd::SetMeetingTx(tx) => {
+                    meeting_tx = tx;
+                    speech_buffer.clear();
+                    was_speech = false;
                 }
             }
         }
