@@ -564,12 +564,13 @@ impl AudioRecordingManager {
 
     #[cfg(target_os = "windows")]
     pub fn start_meeting_mode(&self) -> Result<(), anyhow::Error> {
+        use std::io::Write;
+
         if *self.meeting_mode.lock().unwrap() {
             return Ok(());
         }
 
-        // Open the loopback recorder without holding any locks — WASAPI init
-        // blocks on init_rx.recv() and can take hundreds of milliseconds.
+        // Open loopback recorder (unchanged from before)
         let mut new_loopback = crate::audio_toolkit::LoopbackRecorder::new();
         match new_loopback.open() {
             Ok(()) => {
@@ -582,8 +583,96 @@ impl AudioRecordingManager {
             }
         }
 
+        let start_time = chrono::Local::now();
         self.meeting_segments.lock().unwrap().clear();
-        *self.meeting_start_time.lock().unwrap() = Some(chrono::Local::now());
+        *self.meeting_start_time.lock().unwrap() = Some(start_time);
+
+        // Create transcript file and write header immediately
+        let path = resolve_transcript_path(&self.app_handle, start_time)?;
+        {
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .map_err(|e| anyhow::anyhow!("Failed to create transcript file: {e}"))?;
+            writeln!(file, "Meeting: {}", start_time.format("%Y-%m-%d %H:%M"))?;
+            writeln!(file)?; // blank line before segments
+        }
+        *self.transcript_path.lock().unwrap() = Some(path.clone());
+
+        // Create bounded channel for audio chunks (8 slots = ~4 minutes of buffered work)
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(8);
+
+        // Register the segment callback on the recorder
+        {
+            let recorder = self.recorder.lock().unwrap();
+            if let Some(r) = recorder.as_ref() {
+                r.set_meeting_tx(Some(tx.clone()));
+            }
+        }
+        *self.meeting_chunk_tx.lock().unwrap() = Some(tx);
+
+        // Spawn worker thread: transcribes chunks and writes to file progressively
+        let app_handle = self.app_handle.clone();
+        let segments_arc = self.meeting_segments.clone();
+        let worker = std::thread::spawn(move || {
+            use std::io::Write as IoWrite;
+
+            let tm = match app_handle.try_state::<std::sync::Arc<crate::managers::transcription::TranscriptionManager>>() {
+                Some(s) => s.inner().clone(),
+                None => {
+                    error!("Meeting mode worker: TranscriptionManager not available");
+                    return;
+                }
+            };
+
+            let file = match std::fs::OpenOptions::new().append(true).open(&path) {
+                Ok(f) => f,
+                Err(e) => {
+                    error!("Meeting mode worker: failed to open transcript file: {e}");
+                    return;
+                }
+            };
+            let mut writer = std::io::BufWriter::new(file);
+            let mut index: u32 = 0;
+
+            while let Ok(chunk) = rx.recv() {
+                match tm.transcribe(chunk) {
+                    Ok(text) if !text.is_empty() => {
+                        let ts = chrono::Local::now();
+                        let line = format!("[{}] {}\n", ts.format("%H:%M:%S"), text);
+
+                        // Write to file immediately (crash-resilient)
+                        if let Err(e) = writer.write_all(line.as_bytes()) {
+                            error!("Meeting mode worker: failed to write segment: {e}");
+                        } else {
+                            let _ = writer.flush();
+                        }
+
+                        // Update in-memory accumulator (for stop_meeting_mode duration calc)
+                        segments_arc.lock().unwrap().push((ts, text.clone()));
+
+                        // Notify frontend
+                        let _ = app_handle.emit(
+                            "meeting-segment-transcribed",
+                            MeetingSegmentEvent {
+                                text,
+                                timestamp: format!("[{}]", ts.format("%H:%M:%S")),
+                                index,
+                            },
+                        );
+                        index += 1;
+                    }
+                    Ok(_) => {} // empty result — silence or noise, skip
+                    Err(e) => error!("Meeting mode worker: transcription error: {e}"),
+                }
+            }
+            // rx closed — meeting mode stopped, worker exits cleanly
+            debug!("Meeting mode worker thread finished");
+        });
+
+        *self.meeting_worker_handle.lock().unwrap() = Some(worker);
         *self.meeting_mode.lock().unwrap() = true;
         Ok(())
     }
@@ -667,6 +756,22 @@ impl AudioRecordingManager {
             }
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_transcript_path(
+    app: &tauri::AppHandle,
+    start: chrono::DateTime<chrono::Local>,
+) -> Result<std::path::PathBuf, anyhow::Error> {
+    let docs_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| anyhow::anyhow!("Failed to resolve Documents directory: {e}"))?;
+    let meetings_dir = docs_dir.join("Handy").join("meetings");
+    std::fs::create_dir_all(&meetings_dir)
+        .map_err(|e| anyhow::anyhow!("Failed to create meetings directory: {e}"))?;
+    let filename = format!("meeting_{}.txt", start.format("%Y-%m-%d_%H-%M-%S"));
+    Ok(meetings_dir.join(filename))
 }
 
 #[cfg(target_os = "windows")]
