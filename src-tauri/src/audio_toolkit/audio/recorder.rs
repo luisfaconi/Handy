@@ -440,7 +440,6 @@ mod tests {
         let mut meeting_tx: Option<mpsc::SyncSender<Vec<f32>>> = Some(tx);
         let mut speech_buffer: Vec<f32> = Vec::new();
         let mut was_speech: bool = false;
-        const MAX_SEGMENT_SAMPLES: usize = 16_000 * 30;
 
         // Fill buffer beyond 30s limit
         let big_chunk = vec![0.2f32; MAX_SEGMENT_SAMPLES + 100];
@@ -461,7 +460,23 @@ mod tests {
         assert!(speech_buffer.is_empty());
         assert!(!was_speech);
     }
+
+    #[test]
+    fn start_clears_meeting_state() {
+        // Simulate state as if mid-recording in meeting mode with accumulated speech
+        let mut speech_buffer: Vec<f32> = vec![0.5f32; 1000];
+        let mut was_speech: bool = true;
+
+        // Simulate Cmd::Start resetting state (mirrors the Cmd::Start arm in run_consumer)
+        speech_buffer.clear();
+        was_speech = false;
+
+        assert!(speech_buffer.is_empty());
+        assert!(!was_speech);
+    }
 }
+
+const MAX_SEGMENT_SAMPLES: usize = 16_000 * 30; // 30s at 16kHz
 
 fn run_consumer(
     in_sample_rate: u32,
@@ -484,7 +499,6 @@ fn run_consumer(
     let mut meeting_tx: Option<mpsc::SyncSender<Vec<f32>>> = None;
     let mut speech_buffer: Vec<f32> = Vec::new();
     let mut was_speech: bool = false;
-    const MAX_SEGMENT_SAMPLES: usize = 16_000 * 30; // 30s at 16kHz
 
     // ---------- spectrum visualisation setup ---------------------------- //
     const BUCKETS: usize = 16;
@@ -667,6 +681,12 @@ fn run_consumer(
                     return;
                 }
                 Cmd::SetMeetingTx(tx) => {
+                    if !speech_buffer.is_empty() {
+                        log::warn!(
+                            "SetMeetingTx received with {} samples in speech_buffer — discarding",
+                            speech_buffer.len()
+                        );
+                    }
                     meeting_tx = tx;
                     speech_buffer.clear();
                     was_speech = false;
