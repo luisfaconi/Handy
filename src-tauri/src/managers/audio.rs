@@ -922,7 +922,13 @@ fn resolve_transcript_path(
     let meetings_dir = app_data_dir.join("meetings");
     std::fs::create_dir_all(&meetings_dir)
         .map_err(|e| anyhow::anyhow!("Failed to create meetings directory: {e}"))?;
-    let filename = format!("meeting_{}.txt", start.format("%Y-%m-%d_%H-%M-%S"));
-    Ok(meetings_dir.join(filename))
+    let base = format!("meeting_{}", start.format("%Y-%m-%d_%H-%M-%S"));
+    let mut path = meetings_dir.join(format!("{base}.txt"));
+    let mut n = 1u32;
+    while path.exists() {
+        path = meetings_dir.join(format!("{base}_{n}.txt"));
+        n += 1;
+    }
+    Ok(path)
 }
 
