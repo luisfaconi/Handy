@@ -745,17 +745,13 @@ impl AudioRecordingManager {
         let start_time = self.meeting_start_time.lock().unwrap().take();
         let path = self.transcript_path.lock().unwrap().take();
 
-        // Nothing transcribed: don't report a file path
-        if segments.is_empty() {
-            return Ok(None);
-        }
-
+        // No transcript file was created — nothing to save
         let path = match path {
             Some(p) => p,
             None => return Ok(None),
         };
 
-        // Append duration footer to the file
+        // Append duration footer to the file whenever we have a start time
         let start = start_time.unwrap_or_else(chrono::Local::now);
         let end = chrono::Local::now();
         let duration = end.signed_duration_since(start);
@@ -770,7 +766,9 @@ impl AudioRecordingManager {
             let _ = writeln!(f, "Duration: {:02}:{:02}:{:02}", hours, minutes, seconds);
         }
 
-        // Save to history so the meeting transcript appears in the history panel
+        // Save to history so the meeting transcript appears in the history panel.
+        // We save even when segments is empty (no speech detected) so the entry
+        // always appears and the user can open the transcript file.
         let full_text: String = segments
             .iter()
             .map(|(_, t)| t.as_str())
