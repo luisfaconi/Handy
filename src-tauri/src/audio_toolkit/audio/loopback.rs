@@ -5,9 +5,9 @@ pub use windows_impl::LoopbackRecorder;
 
 #[cfg(target_os = "windows")]
 mod windows_impl {
-    use crate::audio_toolkit::audio::FrameResampler;
+    use crate::audio_toolkit::audio::{AudioVisualiser, FrameResampler};
     use crate::audio_toolkit::constants;
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc};
     use std::time::Duration;
 
     const WAVE_FORMAT_IEEE_FLOAT: u16 = 3;
@@ -21,6 +21,7 @@ mod windows_impl {
     pub struct LoopbackRecorder {
         cmd_tx: Option<mpsc::Sender<Cmd>>,
         worker_handle: Option<std::thread::JoinHandle<()>>,
+        level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     }
 
     impl LoopbackRecorder {
@@ -28,7 +29,15 @@ mod windows_impl {
             LoopbackRecorder {
                 cmd_tx: None,
                 worker_handle: None,
+                level_cb: None,
             }
+        }
+
+        pub fn set_level_cb<F>(&mut self, cb: F)
+        where
+            F: Fn(Vec<f32>) + Send + Sync + 'static,
+        {
+            self.level_cb = Some(Arc::new(cb));
         }
 
         pub fn open(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -39,8 +48,10 @@ mod windows_impl {
             let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
             let (init_tx, init_rx) = mpsc::sync_channel::<Result<(), String>>(1);
 
+            let level_cb = self.level_cb.clone();
+
             let worker = std::thread::spawn(move || {
-                run_loopback_worker(cmd_rx, init_tx);
+                run_loopback_worker(cmd_rx, init_tx, level_cb);
             });
 
             match init_rx.recv() {
@@ -100,6 +111,7 @@ mod windows_impl {
     fn run_loopback_worker(
         cmd_rx: mpsc::Receiver<Cmd>,
         init_tx: mpsc::SyncSender<Result<(), String>>,
+        level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     ) {
         use windows::Win32::{
             Media::Audio::{
@@ -161,7 +173,7 @@ mod windows_impl {
 
             let _ = init_tx.send(Ok(()));
 
-            run_capture_loop(&capture_client, sample_rate, channels, bits_per_sample, format_tag, &cmd_rx);
+            run_capture_loop(&capture_client, sample_rate, channels, bits_per_sample, format_tag, &cmd_rx, level_cb);
 
             let _ = audio_client.Stop();
         }
@@ -174,6 +186,7 @@ mod windows_impl {
         bits_per_sample: u16,
         format_tag: u16,
         cmd_rx: &mpsc::Receiver<Cmd>,
+        level_cb: Option<Arc<dyn Fn(Vec<f32>) + Send + Sync + 'static>>,
     ) {
         let mut resampler = FrameResampler::new(
             sample_rate as usize,
@@ -182,6 +195,12 @@ mod windows_impl {
         );
         let mut recording = false;
         let mut buffer = Vec::<f32>::new();
+
+        const BUCKETS: usize = 16;
+        const WINDOW_SIZE: usize = 512;
+        let mut visualizer = level_cb.as_ref().map(|_| {
+            AudioVisualiser::new(sample_rate, WINDOW_SIZE, BUCKETS, 400.0, 4000.0)
+        });
 
         loop {
             while let Ok(cmd) = cmd_rx.try_recv() {
@@ -252,6 +271,12 @@ mod windows_impl {
                                     .collect()
                             }
                         };
+
+                        if let (Some(vis), Some(cb)) = (&mut visualizer, &level_cb) {
+                            if let Some(buckets) = vis.feed(&mono) {
+                                cb(buckets);
+                            }
+                        }
 
                         resampler.push(&mono, &mut |frame: &[f32]| {
                             buffer.extend_from_slice(frame)

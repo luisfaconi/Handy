@@ -589,8 +589,15 @@ impl AudioRecordingManager {
             return Ok(());
         }
 
-        // Open loopback recorder (unchanged from before)
+        // Open loopback recorder — register level callback so the overlay
+        // bars respond to system audio during meeting mode.
         let mut new_loopback = crate::audio_toolkit::LoopbackRecorder::new();
+        {
+            let app_handle_clone = self.app_handle.clone();
+            new_loopback.set_level_cb(move |levels| {
+                crate::overlay::emit_levels(&app_handle_clone, &levels);
+            });
+        }
         match new_loopback.open() {
             Ok(()) => {
                 *self.loopback_recorder.lock().unwrap() = Some(new_loopback);
