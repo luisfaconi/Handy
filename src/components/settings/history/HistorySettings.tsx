@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { Check, Copy, FolderOpen, RotateCcw, Star, Trash2 } from "lucide-react";
+import { Check, Copy, FileText, FolderOpen, RotateCcw, Star, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -234,6 +234,17 @@ export const HistorySettings: React.FC = () => {
     }
   };
 
+  const openMeetingsFolder = async () => {
+    try {
+      const result = await commands.openMeetingsFolder();
+      if (result.status !== "ok") {
+        throw new Error(String(result.error));
+      }
+    } catch (error) {
+      console.error("Failed to open meetings folder:", error);
+    }
+  };
+
   let content: React.ReactNode;
 
   if (loading) {
@@ -279,14 +290,74 @@ export const HistorySettings: React.FC = () => {
               {t("settings.history.title")}
             </h2>
           </div>
-          <OpenRecordingsButton
-            onClick={openRecordingsFolder}
-            label={t("settings.history.openFolder")}
-          />
+          <div className="flex items-center gap-2">
+            {entries.some((e) => e.entry_type === "meeting") && (
+              <OpenRecordingsButton
+                onClick={openMeetingsFolder}
+                label={t("settings.meetingMode.openFolder")}
+              />
+            )}
+            <OpenRecordingsButton
+              onClick={openRecordingsFolder}
+              label={t("settings.history.openFolder")}
+            />
+          </div>
         </div>
         <div className="bg-background border border-mid-gray/20 rounded-lg overflow-visible">
           {content}
         </div>
+      </div>
+    </div>
+  );
+};
+
+const MeetingHistoryEntry: React.FC<{
+  entry: HistoryEntry;
+  onDelete: () => void;
+}> = ({ entry, onDelete }) => {
+  const { t, i18n } = useTranslation();
+
+  const handleOpenFile = async () => {
+    try {
+      await commands.openMeetingFile(entry.file_name);
+    } catch (error) {
+      console.error("Failed to open meeting file:", error);
+    }
+  };
+
+  const handleOpenFolder = async () => {
+    try {
+      await commands.openMeetingsFolder();
+    } catch (error) {
+      console.error("Failed to open meetings folder:", error);
+    }
+  };
+
+  return (
+    <div className="px-4 py-2 pb-4 flex flex-col gap-2">
+      <div className="flex justify-between items-center">
+        <p className="text-sm font-medium">
+          {formatDateTime(String(entry.timestamp), i18n.language)}
+        </p>
+        <IconButton onClick={onDelete} title={t("settings.history.delete")}>
+          <Trash2 width={16} height={16} />
+        </IconButton>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={handleOpenFile}
+          className="flex items-center gap-1.5 text-xs text-text/60 hover:text-text/90 transition-colors"
+        >
+          <FileText width={13} height={13} />
+          <span>{t("settings.history.openTranscript")}</span>
+        </button>
+        <button
+          onClick={handleOpenFolder}
+          className="flex items-center gap-1.5 text-xs text-text/40 hover:text-text/70 transition-colors"
+        >
+          <FolderOpen width={13} height={13} />
+          <span>{t("settings.meetingMode.openFolder")}</span>
+        </button>
       </div>
     </div>
   );
@@ -314,7 +385,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
   const [retrying, setRetrying] = useState(false);
 
   const hasTranscription = entry.transcription_text.trim().length > 0;
-  const isMeetingEntry = entry.file_name.endsWith(".txt");
+  const isMeetingEntry = entry.entry_type === "meeting";
 
   const handleLoadAudio = useCallback(
     () => getAudioUrl(entry.file_name),
@@ -354,6 +425,15 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
 
   const formattedDate = formatDateTime(String(entry.timestamp), i18n.language);
 
+  if (isMeetingEntry) {
+    return (
+      <MeetingHistoryEntry
+        entry={entry}
+        onDelete={handleDeleteEntry}
+      />
+    );
+  }
+
   return (
     <div className="px-4 py-2 pb-5 flex flex-col gap-3">
       <div className="flex justify-between items-center">
@@ -386,23 +466,21 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
               fill={entry.saved ? "currentColor" : "none"}
             />
           </IconButton>
-          {!isMeetingEntry && (
-            <IconButton
-              onClick={handleRetranscribe}
-              disabled={retrying}
-              title={t("settings.history.retranscribe")}
-            >
-              <RotateCcw
-                width={16}
-                height={16}
-                style={
-                  retrying
-                    ? { animation: "spin 1s linear infinite reverse" }
-                    : undefined
-                }
-              />
-            </IconButton>
-          )}
+          <IconButton
+            onClick={handleRetranscribe}
+            disabled={retrying}
+            title={t("settings.history.retranscribe")}
+          >
+            <RotateCcw
+              width={16}
+              height={16}
+              style={
+                retrying
+                  ? { animation: "spin 1s linear infinite reverse" }
+                  : undefined
+              }
+            />
+          </IconButton>
           <IconButton
             onClick={handleDeleteEntry}
             disabled={retrying}
@@ -442,9 +520,7 @@ const HistoryEntryComponent: React.FC<HistoryEntryProps> = ({
             : t("settings.history.transcriptionFailed")}
       </p>
 
-      {!entry.file_name.endsWith(".txt") && (
-        <AudioPlayer onLoadRequest={handleLoadAudio} className="w-full" />
-      )}
+      <AudioPlayer onLoadRequest={handleLoadAudio} className="w-full" />
     </div>
   );
 };
