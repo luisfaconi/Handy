@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
+import { FolderOpen } from "lucide-react";
 import { ToggleSwitch } from "../ui/ToggleSwitch";
+import { commands } from "@/bindings";
 
 export const MeetingModeToggle: React.FC = React.memo(() => {
   const { t } = useTranslation();
@@ -12,8 +13,8 @@ export const MeetingModeToggle: React.FC = React.memo(() => {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    invoke<boolean>("is_meeting_mode_supported").then(setSupported);
-    invoke<boolean>("get_meeting_mode_state").then(setActive);
+    commands.isMeetingModeSupported().then(setSupported);
+    commands.getMeetingModeState().then(setActive);
     return () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
@@ -26,13 +27,13 @@ export const MeetingModeToggle: React.FC = React.memo(() => {
     setSavedPath(null);
     try {
       if (enabled) {
-        await invoke("start_meeting_mode");
+        await commands.startMeetingMode();
         setActive(true);
       } else {
-        const filePath = await invoke<string | null>("stop_meeting_mode");
+        const result = await commands.stopMeetingMode();
         setActive(false);
-        if (filePath) {
-          setSavedPath(filePath);
+        if (result.status === "ok" && result.data) {
+          setSavedPath(result.data);
           toastTimer.current = setTimeout(() => setSavedPath(null), 6000);
         }
       }
@@ -40,6 +41,14 @@ export const MeetingModeToggle: React.FC = React.memo(() => {
       console.error("Meeting mode toggle error:", err);
     }
     setLoading(false);
+  };
+
+  const handleOpenFolder = async () => {
+    try {
+      await commands.openMeetingsFolder();
+    } catch (err) {
+      console.error("Failed to open meetings folder:", err);
+    }
   };
 
   return (
@@ -53,11 +62,21 @@ export const MeetingModeToggle: React.FC = React.memo(() => {
         descriptionMode="tooltip"
         grouped={true}
       />
-      {savedPath && (
-        <p className="text-xs text-green-600 mt-1 px-2 truncate">
-          {t("settings.meetingMode.transcriptSaved")}: {savedPath}
-        </p>
-      )}
+      <div className="flex items-center gap-2 px-2 mt-1">
+        <button
+          onClick={handleOpenFolder}
+          className="flex items-center gap-1 text-xs text-text/50 hover:text-text/80 transition-colors"
+          title={t("settings.meetingMode.openFolder")}
+        >
+          <FolderOpen width={13} height={13} />
+          <span>{t("settings.meetingMode.openFolder")}</span>
+        </button>
+        {savedPath && (
+          <p className="text-xs text-green-600 truncate">
+            {t("settings.meetingMode.transcriptSaved")}: {savedPath}
+          </p>
+        )}
+      </div>
     </div>
   );
 });

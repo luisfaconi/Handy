@@ -770,6 +770,29 @@ impl AudioRecordingManager {
             let _ = writeln!(f, "Duration: {:02}:{:02}:{:02}", hours, minutes, seconds);
         }
 
+        // Save to history so the meeting transcript appears in the history panel
+        let full_text: String = segments
+            .iter()
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if !file_name.is_empty() {
+            if let Some(hm) = self
+                .app_handle
+                .try_state::<Arc<crate::managers::history::HistoryManager>>()
+            {
+                if let Err(e) = hm.save_entry(file_name, full_text, false, None, None) {
+                    error!("Meeting mode: failed to save history entry: {e}");
+                }
+            }
+        }
+
         info!("Meeting transcript saved to: {}", path.display());
         Ok(Some(path.to_string_lossy().to_string()))
     }

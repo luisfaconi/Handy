@@ -369,3 +369,23 @@ pub fn stop_meeting_mode(app: AppHandle) -> Result<Option<String>, String> {
 pub fn set_overlay_expanded(app: AppHandle, expanded: bool) {
     crate::overlay::set_overlay_expanded(&app, expanded);
 }
+
+/// Opens the folder that contains meeting transcript (.txt) files.
+/// The folder is created if it does not exist yet.
+#[tauri::command]
+#[specta::specta]
+pub fn open_meetings_folder(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let docs_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("Failed to resolve Documents directory: {e}"))?;
+    let meetings_dir = docs_dir.join("Handy").join("meetings");
+    std::fs::create_dir_all(&meetings_dir)
+        .map_err(|e| format!("Failed to create meetings directory: {e}"))?;
+
+    app.opener()
+        .open_path(meetings_dir.to_string_lossy().as_ref(), None::<String>)
+        .map_err(|e| format!("Failed to open meetings folder: {e}"))
+}

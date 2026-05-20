@@ -748,6 +748,21 @@ async stopMeetingMode() : Promise<Result<string | null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async setOverlayExpanded(expanded: boolean) : Promise<void> {
+    await TAURI_INVOKE("set_overlay_expanded", { expanded });
+},
+/**
+ * Opens the folder that contains meeting transcript (.txt) files.
+ * The folder is created if it does not exist yet.
+ */
+async openMeetingsFolder() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("open_meetings_folder") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async setModelUnloadTimeout(timeout: ModelUnloadTimeout) : Promise<void> {
     await TAURI_INVOKE("set_model_unload_timeout", { timeout });
 },
