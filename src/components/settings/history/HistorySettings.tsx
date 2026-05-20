@@ -319,7 +319,10 @@ const MeetingHistoryEntry: React.FC<{
 
   const handleOpenFile = async () => {
     try {
-      await commands.openMeetingFile(entry.file_name);
+      const result = await commands.openMeetingFile(entry.file_name);
+      if (result.status !== "ok") {
+        console.error("Failed to open meeting file:", result.error);
+      }
     } catch (error) {
       console.error("Failed to open meeting file:", error);
     }
@@ -327,7 +330,10 @@ const MeetingHistoryEntry: React.FC<{
 
   const handleOpenFolder = async () => {
     try {
-      await commands.openMeetingsFolder();
+      const result = await commands.openMeetingsFolder();
+      if (result.status !== "ok") {
+        console.error("Failed to open meetings folder:", result.error);
+      }
     } catch (error) {
       console.error("Failed to open meetings folder:", error);
     }
