@@ -389,3 +389,19 @@ pub fn open_meetings_folder(app: AppHandle) -> Result<(), String> {
         .open_path(meetings_dir.to_string_lossy().as_ref(), None::<String>)
         .map_err(|e| format!("Failed to open meetings folder: {e}"))
 }
+
+#[tauri::command]
+#[specta::specta]
+pub fn open_meeting_file(app: AppHandle, file_name: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let docs_dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("Failed to resolve Documents directory: {e}"))?;
+    let file_path = docs_dir.join("Handy").join("meetings").join(&file_name);
+
+    app.opener()
+        .open_path(file_path.to_string_lossy().as_ref(), None::<String>)
+        .map_err(|e| format!("Failed to open meeting file: {e}"))
+}
