@@ -917,11 +917,9 @@ fn resolve_transcript_path(
     app: &tauri::AppHandle,
     start: chrono::DateTime<chrono::Local>,
 ) -> Result<std::path::PathBuf, anyhow::Error> {
-    let docs_dir = app
-        .path()
-        .document_dir()
-        .map_err(|e| anyhow::anyhow!("Failed to resolve Documents directory: {e}"))?;
-    let meetings_dir = docs_dir.join("Handy").join("meetings");
+    let app_data_dir = crate::portable::app_data_dir(app)
+        .map_err(|e| anyhow::anyhow!("Failed to resolve app data directory: {e}"))?;
+    let meetings_dir = app_data_dir.join("meetings");
     std::fs::create_dir_all(&meetings_dir)
         .map_err(|e| anyhow::anyhow!("Failed to create meetings directory: {e}"))?;
     let filename = format!("meeting_{}.txt", start.format("%Y-%m-%d_%H-%M-%S"));

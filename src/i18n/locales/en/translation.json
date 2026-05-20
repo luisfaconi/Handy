@@ -515,7 +515,11 @@
       "description": "Captures both your microphone and system audio (Teams, Meet, Zoom). Saves a full transcript when stopped.",
       "transcriptSaved": "Transcript saved",
       "openFolder": "Open meetings folder",
-      "systemAudioUnavailable": "System audio unavailable — capturing microphone only"
+      "systemAudioUnavailable": "System audio unavailable — capturing microphone only",
+      "directory": {
+        "title": "Meetings Folder",
+        "description": "Location where meeting transcripts (.txt files) are saved"
+      }
     },
     "about": {
       "title": "About",

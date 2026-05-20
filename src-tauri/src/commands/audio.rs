@@ -370,6 +370,30 @@ pub fn set_overlay_expanded(app: AppHandle, expanded: bool) {
     crate::overlay::set_overlay_expanded(&app, expanded);
 }
 
+fn meetings_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let app_data_dir = crate::portable::app_data_dir(app)
+        .map_err(|e| format!("Failed to get app data directory: {e}"))?;
+    Ok(app_data_dir.join("meetings"))
+}
+
+/// Returns the path to the meetings folder (Windows only).
+#[tauri::command]
+#[specta::specta]
+pub fn get_meetings_dir_path(app: AppHandle) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let dir = meetings_dir(&app)?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create meetings directory: {e}"))?;
+        Ok(dir.to_string_lossy().to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+        Err("Meeting mode is only supported on Windows".to_string())
+    }
+}
+
 /// Opens the folder that contains meeting transcript (.txt) files.
 /// The folder is created if it does not exist yet.
 #[tauri::command]
@@ -377,16 +401,12 @@ pub fn set_overlay_expanded(app: AppHandle, expanded: bool) {
 pub fn open_meetings_folder(app: AppHandle) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
 
-    let docs_dir = app
-        .path()
-        .document_dir()
-        .map_err(|e| format!("Failed to resolve Documents directory: {e}"))?;
-    let meetings_dir = docs_dir.join("Handy").join("meetings");
-    std::fs::create_dir_all(&meetings_dir)
+    let dir = meetings_dir(&app)?;
+    std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create meetings directory: {e}"))?;
 
     app.opener()
-        .open_path(meetings_dir.to_string_lossy().as_ref(), None::<String>)
+        .open_path(dir.to_string_lossy().as_ref(), None::<String>)
         .map_err(|e| format!("Failed to open meetings folder: {e}"))
 }
 
@@ -395,14 +415,10 @@ pub fn open_meetings_folder(app: AppHandle) -> Result<(), String> {
 pub fn open_meeting_file(app: AppHandle, file_name: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
 
-    let docs_dir = app
-        .path()
-        .document_dir()
-        .map_err(|e| format!("Failed to resolve Documents directory: {e}"))?;
-    let meetings_dir = docs_dir.join("Handy").join("meetings");
-    let file_path = meetings_dir.join(&file_name);
+    let dir = meetings_dir(&app)?;
+    let file_path = dir.join(&file_name);
 
-    if !file_path.starts_with(&meetings_dir) {
+    if !file_path.starts_with(&dir) {
         return Err("Invalid file name".to_string());
     }
 

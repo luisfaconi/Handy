@@ -420,6 +420,7 @@ pub fn run(cli_args: CliArgs) {
             commands::audio::start_meeting_mode,
             commands::audio::stop_meeting_mode,
             commands::audio::set_overlay_expanded,
+            commands::audio::get_meetings_dir_path,
             commands::audio::open_meetings_folder,
             commands::audio::open_meeting_file,
             commands::transcription::set_model_unload_timeout,

@@ -752,6 +752,17 @@ async setOverlayExpanded(expanded: boolean) : Promise<void> {
     await TAURI_INVOKE("set_overlay_expanded", { expanded });
 },
 /**
+ * Returns the path to the meetings folder (Windows only).
+ */
+async getMeetingsDirPath() : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meetings_dir_path") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Opens the folder that contains meeting transcript (.txt) files.
  * The folder is created if it does not exist yet.
  */
