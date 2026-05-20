@@ -360,7 +360,7 @@ pub fn is_no_input_device_error(error_message: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_microphone_access_denied, is_no_input_device_error};
+    use super::{is_microphone_access_denied, is_no_input_device_error, MAX_SEGMENT_SAMPLES};
 
     #[test]
     fn detects_access_is_denied() {
