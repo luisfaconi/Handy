@@ -617,6 +617,19 @@ pub fn run(cli_args: CliArgs) {
             if let tauri::RunEvent::Reopen { .. } = &event {
                 show_main_window(app);
             }
+
+            if let tauri::RunEvent::Exit = &event {
+                // Ensure any active meeting session is finalized before the process exits
+                // so the transcript is saved to history even if the user closes the app
+                // without toggling meeting mode off.
+                #[cfg(target_os = "windows")]
+                if let Some(rm) = app.try_state::<Arc<AudioRecordingManager>>() {
+                    if let Err(e) = rm.stop_meeting_mode() {
+                        log::error!("Shutdown: failed to stop meeting mode: {e}");
+                    }
+                }
+            }
+
             let _ = (app, event); // suppress unused warnings on non-macOS
         });
 }
