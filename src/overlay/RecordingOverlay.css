@@ -1,8 +1,8 @@
 .recording-overlay {
   height: 36px;
-  width: 172px;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  width: 100%;
+  display: flex;
+  flex-direction: row;
   align-items: center;
   padding: 6px;
   background: #000000cc;
@@ -10,14 +10,17 @@
   opacity: 0;
   transition: opacity 300ms ease-out;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .overlay-left {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .overlay-middle {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -27,6 +30,21 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.overlay-segment {
+  flex-shrink: 0;
+  max-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding-left: 0;
+  transition: max-width 150ms ease-out;
+}
+
+.recording-overlay.has-segment .overlay-segment {
+  max-width: 160px;
+  padding-left: 8px;
 }
 
 .bars-container {
@@ -94,32 +112,23 @@
   transform: scale(0.95);
 }
 
-.recording-overlay.has-segment {
-  height: auto;
-  min-height: 36px;
-}
-
-.segment-preview {
-  grid-column: 1 / -1;
+.segment-text {
   color: #ffffffcc;
   font-size: 10px;
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  padding: 2px 4px 4px 4px;
-  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  animation: segment-fade-in 200ms ease-out;
+  display: block;
+  animation: segment-fade-in 150ms ease-out;
 }
 
 @keyframes segment-fade-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }

@@ -419,6 +419,7 @@ pub fn run(cli_args: CliArgs) {
             commands::audio::get_meeting_mode_state,
             commands::audio::start_meeting_mode,
             commands::audio::stop_meeting_mode,
+            commands::audio::set_overlay_expanded,
             commands::transcription::set_model_unload_timeout,
             commands::transcription::get_model_load_status,
             commands::transcription::unload_model_manually,

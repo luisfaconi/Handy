@@ -363,3 +363,9 @@ pub fn stop_meeting_mode(app: AppHandle) -> Result<Option<String>, String> {
         Err("Meeting mode is only supported on Windows".to_string())
     }
 }
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_overlay_expanded(app: AppHandle, expanded: bool) {
+    crate::overlay::set_overlay_expanded(&app, expanded);
+}

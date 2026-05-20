@@ -32,6 +32,7 @@ tauri_panel! {
 }
 
 const OVERLAY_WIDTH: f64 = 172.0;
+const OVERLAY_EXPANDED_WIDTH: f64 = 340.0;
 const OVERLAY_HEIGHT: f64 = 36.0;
 
 #[cfg(target_os = "macos")]
@@ -392,5 +393,48 @@ pub fn emit_levels(app_handle: &AppHandle, levels: &Vec<f32>) {
     // also emit to the recording overlay if it's open
     if let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") {
         let _ = overlay_window.emit("mic-level", levels);
+    }
+}
+
+/// Expands or collapses the overlay window width to accommodate the inline segment text.
+/// When expanded the window widens from OVERLAY_WIDTH to OVERLAY_EXPANDED_WIDTH and is
+/// re-centred on the active monitor; when collapsed it returns to the default size.
+pub fn set_overlay_expanded(app_handle: &AppHandle, expanded: bool) {
+    let Some(overlay_window) = app_handle.get_webview_window("recording_overlay") else {
+        return;
+    };
+
+    let width = if expanded {
+        OVERLAY_EXPANDED_WIDTH
+    } else {
+        OVERLAY_WIDTH
+    };
+
+    let _ = overlay_window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width,
+        height: OVERLAY_HEIGHT,
+    }));
+
+    // Re-centre for the new width so the pill stays visually centred on screen.
+    let monitor = get_monitor_with_cursor(app_handle)
+        .or_else(|| app_handle.primary_monitor().ok().flatten());
+
+    if let Some(monitor) = monitor {
+        let scale = monitor.scale_factor();
+        let monitor_x = monitor.position().x as f64 / scale;
+        let monitor_y = monitor.position().y as f64 / scale;
+        let monitor_width = monitor.size().width as f64 / scale;
+        let monitor_height = monitor.size().height as f64 / scale;
+
+        let settings = settings::get_settings(app_handle);
+        let x = monitor_x + (monitor_width - width) / 2.0;
+        let y = match settings.overlay_position {
+            OverlayPosition::Top => monitor_y + OVERLAY_TOP_OFFSET,
+            OverlayPosition::Bottom | OverlayPosition::None => {
+                monitor_y + monitor_height - OVERLAY_HEIGHT - OVERLAY_BOTTOM_OFFSET
+            }
+        };
+        let _ = overlay_window
+            .set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
     }
 }

@@ -37,6 +37,9 @@ const RecordingOverlay: React.FC = () => {
       // Listen for hide-overlay event from Rust
       const unlistenHide = await listen("hide-overlay", () => {
         setIsVisible(false);
+        setLastSegment(null);
+        if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
+        commands.setOverlayExpanded(false);
       });
 
       // Listen for mic-level updates
@@ -59,9 +62,14 @@ const RecordingOverlay: React.FC = () => {
         timestamp: string;
         index: number;
       }>("meeting-segment-transcribed", (event) => {
+        // Expand native window first (fire-and-forget) so it's ready when CSS animates
+        commands.setOverlayExpanded(true);
         setLastSegment(event.payload.text);
         if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
-        segmentTimerRef.current = setTimeout(() => setLastSegment(null), 3000);
+        segmentTimerRef.current = setTimeout(() => {
+          setLastSegment(null);
+          commands.setOverlayExpanded(false);
+        }, 3000);
       });
 
       // Cleanup function
@@ -137,7 +145,11 @@ const RecordingOverlay: React.FC = () => {
         )}
       </div>
 
-      {lastSegment && <div className="segment-preview">{lastSegment}</div>}
+      <div className="overlay-segment">
+        {lastSegment && (
+          <span className="segment-text">{lastSegment}</span>
+        )}
+      </div>
     </div>
   );
 };
