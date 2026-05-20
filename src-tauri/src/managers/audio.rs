@@ -168,18 +168,9 @@ pub struct AudioRecordingManager {
     #[cfg(target_os = "windows")]
     loopback_recorder: Arc<Mutex<Option<crate::audio_toolkit::LoopbackRecorder>>>,
     #[cfg(target_os = "windows")]
-    meeting_segments: Arc<Mutex<Vec<(chrono::DateTime<chrono::Local>, String)>>>,
-    #[cfg(target_os = "windows")]
-    meeting_start_time: Arc<Mutex<Option<chrono::DateTime<chrono::Local>>>>,
-    #[cfg(target_os = "windows")]
     meeting_chunk_tx: Arc<Mutex<Option<mpsc::SyncSender<Vec<f32>>>>>,
     #[cfg(target_os = "windows")]
     meeting_worker_handle: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
-    #[cfg(target_os = "windows")]
-    transcript_path: Arc<Mutex<Option<std::path::PathBuf>>>,
-    // ID of the live history entry created during this meeting session (updated per segment)
-    #[cfg(target_os = "windows")]
-    meeting_history_entry_id: Arc<Mutex<Option<i64>>>,
 }
 
 impl AudioRecordingManager {
@@ -209,17 +200,9 @@ impl AudioRecordingManager {
             #[cfg(target_os = "windows")]
             loopback_recorder: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "windows")]
-            meeting_segments: Arc::new(Mutex::new(Vec::new())),
-            #[cfg(target_os = "windows")]
-            meeting_start_time: Arc::new(Mutex::new(None)),
-            #[cfg(target_os = "windows")]
             meeting_chunk_tx: Arc::new(Mutex::new(None)),
             #[cfg(target_os = "windows")]
             meeting_worker_handle: Arc::new(Mutex::new(None)),
-            #[cfg(target_os = "windows")]
-            transcript_path: Arc::new(Mutex::new(None)),
-            #[cfg(target_os = "windows")]
-            meeting_history_entry_id: Arc::new(Mutex::new(None)),
         };
 
         // Always-on?  Open immediately.
@@ -370,23 +353,6 @@ impl AudioRecordingManager {
         }
         drop(recorder_opt);
 
-        // If meeting mode was activated before this stream opened (OnDemand path),
-        // the recorder's cmd_tx didn't exist yet so set_meeting_tx was a no-op.
-        // Now that open() has run and cmd_tx exists, register the sender.
-        #[cfg(target_os = "windows")]
-        {
-            let meeting_active = *self.meeting_mode.lock().unwrap();
-            if meeting_active {
-                let tx = self.meeting_chunk_tx.lock().unwrap().clone();
-                if let Some(tx) = tx {
-                    let recorder_opt = self.recorder.lock().unwrap();
-                    if let Some(rec) = recorder_opt.as_ref() {
-                        rec.set_meeting_tx(Some(tx));
-                    }
-                }
-            }
-        }
-
         *open_flag = true;
         // This timing covers through cpal's stream.play() returning — i.e. the
         // point cpal surfaces as "stream running." It does NOT guarantee the
@@ -461,6 +427,16 @@ impl AudioRecordingManager {
                 if let Err(e) = self.start_microphone_stream() {
                     let msg = format!("{e}");
                     error!("Failed to open microphone stream: {msg}");
+                    return Err(msg);
+                }
+            }
+
+            // In meeting mode, begin a new per-PTT segment (new file + channel + worker).
+            #[cfg(target_os = "windows")]
+            if *self.meeting_mode.lock().unwrap() {
+                if let Err(e) = self.begin_meeting_segment() {
+                    let msg = format!("{e}");
+                    error!("Failed to start meeting segment: {msg}");
                     return Err(msg);
                 }
             }
@@ -588,8 +564,6 @@ impl AudioRecordingManager {
 
     #[cfg(target_os = "windows")]
     pub fn start_meeting_mode(&self) -> Result<(), anyhow::Error> {
-        use std::io::Write;
-
         if *self.meeting_mode.lock().unwrap() {
             return Ok(());
         }
@@ -614,13 +588,24 @@ impl AudioRecordingManager {
             }
         }
 
-        let start_time = chrono::Local::now();
-        self.meeting_segments.lock().unwrap().clear();
-        *self.meeting_start_time.lock().unwrap() = Some(start_time);
-        *self.meeting_history_entry_id.lock().unwrap() = None;
+        *self.meeting_mode.lock().unwrap() = true;
+        Ok(())
+    }
 
-        // Create transcript file and write header immediately
+    // Creates a new per-PTT-cycle transcript file, channel, and self-contained worker.
+    // Any previous segment is closed first (its worker finishes in the background).
+    #[cfg(target_os = "windows")]
+    fn begin_meeting_segment(&self) -> Result<(), anyhow::Error> {
+        use std::io::Write;
+
+        // Close the previous segment's channel — the old worker drains and exits on its own.
+        *self.meeting_chunk_tx.lock().unwrap() = None;
+        // Drop the previous join handle; thread continues to completion in background.
+        let _ = self.meeting_worker_handle.lock().unwrap().take();
+
+        let start_time = chrono::Local::now();
         let path = resolve_transcript_path(&self.app_handle, start_time)?;
+
         {
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
@@ -629,35 +614,27 @@ impl AudioRecordingManager {
                 .open(&path)
                 .map_err(|e| anyhow::anyhow!("Failed to create transcript file: {e}"))?;
             writeln!(file, "Meeting: {}", start_time.format("%Y-%m-%d %H:%M"))?;
-            writeln!(file)?; // blank line before segments
+            writeln!(file)?;
         }
-        *self.transcript_path.lock().unwrap() = Some(path.clone());
 
-        // Create bounded channel for audio chunks
-        // 8 slots ≈ ~30-40 seconds of speech backlog at typical VAD chunk sizes
         let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(8);
 
-        // Register the segment callback on the recorder
         {
             let recorder = self.recorder.lock().unwrap();
             if let Some(r) = recorder.as_ref() {
                 r.set_meeting_tx(Some(tx.clone()));
-            } else {
-                log::warn!("Meeting mode: recorder not available, segment dispatch disabled");
             }
         }
         *self.meeting_chunk_tx.lock().unwrap() = Some(tx);
 
-        // Compute the file name once so the worker can reference it for history entries
         let history_file_name = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-
-        // Spawn worker thread: transcribes chunks and writes to file progressively
         let app_handle = self.app_handle.clone();
-        let segments_arc = self.meeting_segments.clone();
-        let history_entry_id_arc = self.meeting_history_entry_id.clone();
+
+        // Self-contained worker: holds all per-segment state locally so each PTT
+        // cycle is fully independent regardless of when it finishes transcribing.
         let worker = std::thread::spawn(move || {
             let tm = match app_handle.try_state::<std::sync::Arc<crate::managers::transcription::TranscriptionManager>>() {
                 Some(s) => (*s).clone(),
@@ -675,6 +652,9 @@ impl AudioRecordingManager {
                 }
             };
             let mut writer = std::io::BufWriter::new(file);
+
+            let mut segments: Vec<(chrono::DateTime<chrono::Local>, String)> = Vec::new();
+            let mut history_entry_id: Option<i64> = None;
             let mut index: u32 = 0;
 
             while let Ok(chunk) = rx.recv() {
@@ -683,63 +663,47 @@ impl AudioRecordingManager {
                         let ts = chrono::Local::now();
                         let line = format!("[{}] {}\n", ts.format("%H:%M:%S"), text);
 
-                        // Write to file immediately (crash-resilient)
                         if let Err(e) = writer.write_all(line.as_bytes()) {
                             error!("Meeting mode worker: failed to write segment: {e}");
                         } else {
                             let _ = writer.flush();
                         }
 
-                        // Update in-memory accumulator (for stop_meeting_mode duration calc)
-                        segments_arc.lock().unwrap().push((ts, text.clone()));
+                        segments.push((ts, text.clone()));
 
-                        // Create or update the live history entry so it appears in real-time
+                        let full_text: String = segments
+                            .iter()
+                            .map(|(_, t)| t.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" ");
+
+                        if let Some(hm) = app_handle
+                            .try_state::<Arc<crate::managers::history::HistoryManager>>()
                         {
-                            let full_text: String = segments_arc
-                                .lock()
-                                .unwrap()
-                                .iter()
-                                .map(|(_, t)| t.as_str())
-                                .collect::<Vec<_>>()
-                                .join(" ");
-
-                            if let Some(hm) = app_handle
-                                .try_state::<Arc<crate::managers::history::HistoryManager>>()
-                            {
-                                let mut id_guard = history_entry_id_arc.lock().unwrap();
-                                match *id_guard {
-                                    Some(id) => {
-                                        if let Err(e) = hm.update_transcription(
-                                            id,
-                                            full_text,
-                                            None,
-                                            None,
-                                        ) {
-                                            error!("Meeting mode worker: failed to update history entry: {e}");
-                                        }
+                            match history_entry_id {
+                                Some(id) => {
+                                    if let Err(e) = hm.update_transcription(id, full_text, None, None) {
+                                        error!("Meeting mode worker: failed to update history entry: {e}");
                                     }
-                                    None => {
-                                        match hm.save_entry(
-                                            history_file_name.clone(),
-                                            full_text,
-                                            false,
-                                            None,
-                                            None,
-                                            crate::managers::history::EntryType::Meeting,
-                                        ) {
-                                            Ok(entry) => {
-                                                *id_guard = Some(entry.id);
-                                            }
-                                            Err(e) => {
-                                                error!("Meeting mode worker: failed to create history entry: {e}");
-                                            }
+                                }
+                                None => {
+                                    match hm.save_entry(
+                                        history_file_name.clone(),
+                                        full_text,
+                                        false,
+                                        None,
+                                        None,
+                                        crate::managers::history::EntryType::Meeting,
+                                    ) {
+                                        Ok(entry) => { history_entry_id = Some(entry.id); }
+                                        Err(e) => {
+                                            error!("Meeting mode worker: failed to create history entry: {e}");
                                         }
                                     }
                                 }
                             }
                         }
 
-                        // Notify frontend
                         let _ = app_handle.emit(
                             "meeting-segment-transcribed",
                             MeetingSegmentEvent {
@@ -750,16 +714,61 @@ impl AudioRecordingManager {
                         );
                         index += 1;
                     }
-                    Ok(_) => {} // empty result — silence or noise, skip
+                    Ok(_) => {}
                     Err(e) => error!("Meeting mode worker: transcription error: {e}"),
                 }
             }
-            // rx closed — meeting mode stopped, worker exits cleanly
+
+            // Channel closed — write footer and finalize history entry.
+            let end = chrono::Local::now();
+            let duration = end.signed_duration_since(start_time);
+            let hours = duration.num_hours().abs();
+            let minutes = (duration.num_minutes() % 60).abs();
+            let seconds = (duration.num_seconds() % 60).abs();
+
+            if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&path) {
+                let mut f = file;
+                let _ = writeln!(f);
+                let _ = writeln!(f, "Duration: {:02}:{:02}:{:02}", hours, minutes, seconds);
+            }
+
+            let full_text: String = segments
+                .iter()
+                .map(|(_, t)| t.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            if let Some(hm) = app_handle
+                .try_state::<Arc<crate::managers::history::HistoryManager>>()
+            {
+                match history_entry_id {
+                    Some(id) => {
+                        if let Err(e) = hm.update_transcription(id, full_text, None, None) {
+                            error!("Meeting mode worker: failed to update history entry on stop: {e}");
+                        }
+                    }
+                    None => {
+                        if !history_file_name.is_empty() {
+                            if let Err(e) = hm.save_entry(
+                                history_file_name,
+                                full_text,
+                                false,
+                                None,
+                                None,
+                                crate::managers::history::EntryType::Meeting,
+                            ) {
+                                error!("Meeting mode worker: failed to save history entry on stop: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            info!("Meeting transcript saved to: {}", path.display());
             debug!("Meeting mode worker thread finished");
         });
 
         *self.meeting_worker_handle.lock().unwrap() = Some(worker);
-        *self.meeting_mode.lock().unwrap() = true;
         Ok(())
     }
 
@@ -772,7 +781,6 @@ impl AudioRecordingManager {
         *meeting = false;
         drop(meeting);
 
-        // Stop loopback recorder (unchanged)
         {
             let mut guard = self.loopback_recorder.lock().unwrap();
             if let Some(ref mut rec) = *guard {
@@ -781,7 +789,7 @@ impl AudioRecordingManager {
             *guard = None;
         }
 
-        // Disconnect the segment callback on the recorder (stops new chunks arriving)
+        // Disconnect the recorder's meeting tx (stops new chunks arriving)
         {
             let recorder = self.recorder.lock().unwrap();
             if let Some(r) = recorder.as_ref() {
@@ -789,88 +797,18 @@ impl AudioRecordingManager {
             }
         }
 
-        // Close the sender — this signals the worker to drain and exit
+        // Drop tx — signals current worker to drain and exit
         *self.meeting_chunk_tx.lock().unwrap() = None;
 
-        // Wait for the worker to finish (drains queue, writes all pending segments)
+        // Join the worker so the transcript and history entry are fully written
+        // before stop_meeting_mode returns (important on app exit).
         if let Some(handle) = self.meeting_worker_handle.lock().unwrap().take() {
             if let Err(e) = handle.join() {
                 error!("Meeting mode worker panicked: {:?}", e);
             }
         }
 
-        // Retrieve state for finalization
-        let segments = self.meeting_segments.lock().unwrap().clone();
-        let start_time = self.meeting_start_time.lock().unwrap().take();
-        let path = self.transcript_path.lock().unwrap().take();
-
-        // No transcript file was created — nothing to save
-        let path = match path {
-            Some(p) => p,
-            None => return Ok(None),
-        };
-
-        // Append duration footer to the file whenever we have a start time
-        let start = start_time.unwrap_or_else(chrono::Local::now);
-        let end = chrono::Local::now();
-        let duration = end.signed_duration_since(start);
-        let hours = duration.num_hours().abs();
-        let minutes = (duration.num_minutes() % 60).abs();
-        let seconds = (duration.num_seconds() % 60).abs();
-
-        if let Ok(file) = std::fs::OpenOptions::new().append(true).open(&path) {
-            use std::io::Write;
-            let mut f = file;
-            let _ = writeln!(f);
-            let _ = writeln!(f, "Duration: {:02}:{:02}:{:02}", hours, minutes, seconds);
-        }
-
-        let full_text: String = segments
-            .iter()
-            .map(|(_, t)| t.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        // Finalize the history entry: update the live entry created during recording,
-        // or create one now (covers the no-speech case where the worker never ran).
-        let entry_id = self.meeting_history_entry_id.lock().unwrap().take();
-        let file_name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        if let Some(hm) = self
-            .app_handle
-            .try_state::<Arc<crate::managers::history::HistoryManager>>()
-        {
-            match entry_id {
-                Some(id) => {
-                    if let Err(e) = hm.update_transcription(id, full_text, None, None) {
-                        error!("Meeting mode: failed to update history entry on stop: {e}");
-                    }
-                }
-                None => {
-                    // No speech was detected — create an entry so the session is visible
-                    if !file_name.is_empty() {
-                        if let Err(e) = hm.save_entry(
-                            file_name,
-                            full_text,
-                            false,
-                            None,
-                            None,
-                            crate::managers::history::EntryType::Meeting,
-                        ) {
-                            error!("Meeting mode: failed to save history entry: {e}");
-                        }
-                    }
-                }
-            }
-        } else {
-            error!("Meeting mode: HistoryManager state not available — entry not saved");
-        }
-
-        info!("Meeting transcript saved to: {}", path.display());
-        Ok(Some(path.to_string_lossy().to_string()))
+        Ok(None)
     }
 
     #[cfg(target_os = "windows")]
