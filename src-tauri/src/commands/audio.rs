@@ -399,7 +399,16 @@ pub fn open_meeting_file(app: AppHandle, file_name: String) -> Result<(), String
         .path()
         .document_dir()
         .map_err(|e| format!("Failed to resolve Documents directory: {e}"))?;
-    let file_path = docs_dir.join("Handy").join("meetings").join(&file_name);
+    let meetings_dir = docs_dir.join("Handy").join("meetings");
+    let file_path = meetings_dir.join(&file_name);
+
+    if !file_path.starts_with(&meetings_dir) {
+        return Err("Invalid file name".to_string());
+    }
+
+    if !file_path.exists() {
+        return Err(format!("Meeting transcript not found: {file_name}"));
+    }
 
     app.opener()
         .open_path(file_path.to_string_lossy().as_ref(), None::<String>)
