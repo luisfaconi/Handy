@@ -12,18 +12,18 @@
 
 ## File Map
 
-| Action | Path |
-|---|---|
-| **Create** | `src-tauri/src/audio_toolkit/audio/loopback.rs` |
-| **Create** | `src-tauri/src/audio_toolkit/audio/mixer.rs` |
-| **Create** | `src/components/settings/MeetingModeToggle.tsx` |
-| **Modify** | `src-tauri/Cargo.toml` |
-| **Modify** | `src-tauri/src/audio_toolkit/audio/mod.rs` |
-| **Modify** | `src-tauri/src/managers/audio.rs` |
-| **Modify** | `src-tauri/src/commands/audio.rs` |
-| **Modify** | `src-tauri/src/lib.rs` |
-| **Modify** | `src-tauri/src/actions.rs` |
-| **Modify** | `src/i18n/locales/en/translation.json` |
+| Action     | Path                                                  |
+| ---------- | ----------------------------------------------------- |
+| **Create** | `src-tauri/src/audio_toolkit/audio/loopback.rs`       |
+| **Create** | `src-tauri/src/audio_toolkit/audio/mixer.rs`          |
+| **Create** | `src/components/settings/MeetingModeToggle.tsx`       |
+| **Modify** | `src-tauri/Cargo.toml`                                |
+| **Modify** | `src-tauri/src/audio_toolkit/audio/mod.rs`            |
+| **Modify** | `src-tauri/src/managers/audio.rs`                     |
+| **Modify** | `src-tauri/src/commands/audio.rs`                     |
+| **Modify** | `src-tauri/src/lib.rs`                                |
+| **Modify** | `src-tauri/src/actions.rs`                            |
+| **Modify** | `src/i18n/locales/en/translation.json`                |
 | **Modify** | `src/components/settings/general/GeneralSettings.tsx` |
 
 ---
@@ -31,6 +31,7 @@
 ## Task 1: Add WASAPI features to Cargo.toml
 
 **Files:**
+
 - Modify: `src-tauri/Cargo.toml`
 
 - [ ] **Step 1.1: Add `Win32_Media_Audio` feature to the windows crate**
@@ -71,6 +72,7 @@ git commit -m "chore: add Win32_Media_Audio feature for WASAPI loopback"
 ## Task 2: Implement LoopbackRecorder (TDD)
 
 **Files:**
+
 - Create: `src-tauri/src/audio_toolkit/audio/loopback.rs`
 
 - [ ] **Step 2.1: Write the failing tests**
@@ -491,6 +493,7 @@ cd src-tauri; cargo test audio_toolkit::audio::loopback -- --nocapture 2>&1 | Se
 ```
 
 Expected output:
+
 ```
 test audio_toolkit::audio::loopback::windows_impl::tests::loopback_recorder_new_does_not_panic ... ok
 test audio_toolkit::audio::loopback::windows_impl::tests::stop_without_open_returns_empty ... ok
@@ -508,6 +511,7 @@ git commit -m "feat: add LoopbackRecorder for WASAPI system audio capture"
 ## Task 3: Implement mix_samples (TDD)
 
 **Files:**
+
 - Create: `src-tauri/src/audio_toolkit/audio/mixer.rs`
 
 - [ ] **Step 3.1: Write the failing tests first**
@@ -624,6 +628,7 @@ git commit -m "feat: add mix_samples for combining mic and loopback audio stream
 ## Task 4: Export new modules from audio/mod.rs
 
 **Files:**
+
 - Modify: `src-tauri/src/audio_toolkit/audio/mod.rs`
 
 - [ ] **Step 4.1: Add the two new modules to mod.rs**
@@ -687,6 +692,7 @@ git commit -m "chore: export LoopbackRecorder and mix_samples from audio module"
 ## Task 5: Add meeting mode to AudioRecordingManager
 
 **Files:**
+
 - Modify: `src-tauri/src/managers/audio.rs`
 
 - [ ] **Step 5.1: Add meeting-mode fields to the struct**
@@ -1005,6 +1011,7 @@ git commit -m "feat: add meeting mode state, loopback integration, and transcrip
 ## Task 6: Hook accumulator into transcription result (actions.rs)
 
 **Files:**
+
 - Modify: `src-tauri/src/actions.rs`
 
 - [ ] **Step 6.1: Add accumulator call after transcription**
@@ -1054,6 +1061,7 @@ git commit -m "feat: accumulate transcription segments for meeting transcript wh
 ## Task 7: Add Tauri commands and register them
 
 **Files:**
+
 - Modify: `src-tauri/src/commands/audio.rs`
 - Modify: `src-tauri/src/lib.rs`
 
@@ -1147,6 +1155,7 @@ git commit -m "feat: add Tauri commands for meeting mode (start/stop/state/suppo
 ## Task 8: Add i18n strings
 
 **Files:**
+
 - Modify: `src/i18n/locales/en/translation.json`
 
 - [ ] **Step 8.1: Add meeting mode keys to English translation**
@@ -1184,6 +1193,7 @@ git commit -m "feat: add i18n keys for meeting mode toggle"
 ## Task 9: Create MeetingModeToggle component and add to settings
 
 **Files:**
+
 - Create: `src/components/settings/MeetingModeToggle.tsx`
 - Modify: `src/components/settings/general/GeneralSettings.tsx`
 
@@ -1262,11 +1272,13 @@ export const MeetingModeToggle: React.FC = React.memo(() => {
 In `src/components/settings/general/GeneralSettings.tsx`, add the import and render the component inside the sound settings group, after `<MicrophoneSelector ... />`:
 
 Add import at top:
+
 ```tsx
 import { MeetingModeToggle } from "../MeetingModeToggle";
 ```
 
 Inside the `<SettingsGroup title={t("settings.sound.title")}>` block, add after `<MicrophoneSelector .../>`:
+
 ```tsx
 <MeetingModeToggle />
 ```
@@ -1380,6 +1392,7 @@ git commit -m "feat: Meeting Mode — WASAPI loopback + transcript export for me
 ## Self-Review Checklist
 
 ### Spec Coverage
+
 - [x] §3.1 Audio pipeline — loopback + mixer + existing VAD/transcription pipeline: Tasks 2–5
 - [x] §3.2 LoopbackRecorder: Task 2
 - [x] §3.2 StreamMixer (`mix_samples`): Task 3
@@ -1398,9 +1411,11 @@ git commit -m "feat: Meeting Mode — WASAPI loopback + transcript export for me
 - [x] §7 Meetings dir creation failure — error propagated to command: Task 5.8
 
 ### Placeholder Scan
+
 - No TBD or TODO remains in the implementation steps.
 
 ### Type Consistency
+
 - `LoopbackRecorder::stop_if_open()` — defined in Task 2, used in Task 5.5 and 5.6 ✓
 - `mix_samples(&[f32], &[f32]) -> Vec<f32>` — defined in Task 3, used in Task 5.5 ✓
 - `add_meeting_segment(String)` — defined in Task 5.7, called in Task 6.1 ✓

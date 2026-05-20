@@ -52,11 +52,11 @@ The VAD, transcription engine, and clipboard/paste behavior are **unchanged**. M
 
 ### 3.3 Changes to Existing Files
 
-| File | Change |
-|---|---|
-| `Cargo.toml` | Add `Win32_Media_Audio`, `Win32_System_Com` features to `windows` crate |
+| File                | Change                                                                                                                                                                              |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Cargo.toml`        | Add `Win32_Media_Audio`, `Win32_System_Com` features to `windows` crate                                                                                                             |
 | `managers/audio.rs` | Add `meeting_mode: bool` state; when true, instantiate `LoopbackRecorder` + `StreamMixer` alongside the existing `AudioRecorder`; accumulate transcription segments with timestamps |
-| `managers/audio.rs` | Auto-disable `mute_while_recording` when Meeting Mode is active (muting output would silence the loopback) |
+| `managers/audio.rs` | Auto-disable `mute_while_recording` when Meeting Mode is active (muting output would silence the loopback)                                                                          |
 
 ### 3.4 Transcription Accumulator
 
@@ -66,11 +66,11 @@ The VAD, transcription engine, and clipboard/paste behavior are **unchanged**. M
 
 ## 4. Tauri Commands
 
-| Command | Description |
-|---|---|
-| `start_meeting_mode` | Starts `LoopbackRecorder` + `StreamMixer`, resets accumulator, returns `Ok(())` or error string |
-| `stop_meeting_mode` | Stops extra streams, writes transcript file, returns the file path as `String` |
-| `get_meeting_mode_state` | Returns `bool` — used by frontend to sync UI on app restart |
+| Command                  | Description                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `start_meeting_mode`     | Starts `LoopbackRecorder` + `StreamMixer`, resets accumulator, returns `Ok(())` or error string |
+| `stop_meeting_mode`      | Stops extra streams, writes transcript file, returns the file path as `String`                  |
+| `get_meeting_mode_state` | Returns `bool` — used by frontend to sync UI on app restart                                     |
 
 ---
 
@@ -81,6 +81,7 @@ The VAD, transcription engine, and clipboard/paste behavior are **unchanged**. M
 The `meetings/` directory is created automatically if it does not exist.
 
 **Format:**
+
 ```
 Meeting: 2026-05-18 14:30
 Duration: 00:42:17
@@ -111,12 +112,12 @@ When Meeting Mode is active, the main window header shows a badge or color chang
 
 ## 7. Error Handling
 
-| Scenario | Behavior |
-|---|---|
-| WASAPI access denied (enterprise policy) | Meeting Mode activates mic-only; toast warning: "System audio unavailable — capturing microphone only" |
-| No default output device | Same as above |
-| `Documents/Handy/meetings/` cannot be created | Toast error; transcript not saved, but clipboard behavior continues normally |
-| Meeting stopped with 0 segments | No file written; no notification shown |
+| Scenario                                      | Behavior                                                                                               |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| WASAPI access denied (enterprise policy)      | Meeting Mode activates mic-only; toast warning: "System audio unavailable — capturing microphone only" |
+| No default output device                      | Same as above                                                                                          |
+| `Documents/Handy/meetings/` cannot be created | Toast error; transcript not saved, but clipboard behavior continues normally                           |
+| Meeting stopped with 0 segments               | No file written; no notification shown                                                                 |
 
 ---
 

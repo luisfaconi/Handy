@@ -790,6 +790,8 @@ impl AudioRecordingManager {
                 if let Err(e) = hm.save_entry(file_name, full_text, false, None, None, crate::managers::history::EntryType::Meeting) {
                     error!("Meeting mode: failed to save history entry: {e}");
                 }
+            } else {
+                error!("Meeting mode: HistoryManager state not available — entry not saved");
             }
         }
 

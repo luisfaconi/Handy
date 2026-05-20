@@ -12,18 +12,19 @@
 
 ## File Map
 
-| File | Change |
-|---|---|
-| `src-tauri/src/audio_toolkit/audio/recorder.rs` | New `Cmd::SetMeetingTx`, `set_meeting_tx()` method, VAD boundary detection in `run_consumer` |
-| `src-tauri/src/managers/audio.rs` | `MeetingSegmentEvent`, new fields, streaming pipeline in `start_meeting_mode` / `stop_meeting_mode` |
-| `src/overlay/RecordingOverlay.tsx` | Event listener, `lastSegment` state, fade display |
-| `src/overlay/RecordingOverlay.css` | `.segment-preview` fade animation |
+| File                                            | Change                                                                                              |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `src-tauri/src/audio_toolkit/audio/recorder.rs` | New `Cmd::SetMeetingTx`, `set_meeting_tx()` method, VAD boundary detection in `run_consumer`        |
+| `src-tauri/src/managers/audio.rs`               | `MeetingSegmentEvent`, new fields, streaming pipeline in `start_meeting_mode` / `stop_meeting_mode` |
+| `src/overlay/RecordingOverlay.tsx`              | Event listener, `lastSegment` state, fade display                                                   |
+| `src/overlay/RecordingOverlay.css`              | `.segment-preview` fade animation                                                                   |
 
 ---
 
 ## Task 1: Extend `AudioRecorder` with `SetMeetingTx` command
 
 **Files:**
+
 - Modify: `src-tauri/src/audio_toolkit/audio/recorder.rs`
 
 - [ ] **Step 1: Add the new `Cmd` variant**
@@ -56,9 +57,11 @@ pub fn set_meeting_tx(&self, tx: Option<mpsc::SyncSender<Vec<f32>>>) {
 - [ ] **Step 3: Verify it compiles**
 
 Run:
+
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
@@ -73,6 +76,7 @@ git commit -m "feat(recorder): add SetMeetingTx command for VAD segment dispatch
 ## Task 2: VAD boundary detection in `run_consumer`
 
 **Files:**
+
 - Modify: `src-tauri/src/audio_toolkit/audio/recorder.rs`
 
 - [ ] **Step 1: Add state variables at the top of `run_consumer`**
@@ -92,6 +96,7 @@ const MAX_SEGMENT_SAMPLES: usize = 16_000 * 30; // 30s at 16kHz
 The current code uses `handle_frame` as a closure argument to `frame_resampler.push`. We need to track VAD results outside that closure to detect speech→noise transitions.
 
 Replace the existing block:
+
 ```rust
 frame_resampler.push(&raw, &mut |frame: &[f32]| {
     handle_frame(frame, recording, &vad, &mut processed_samples)
@@ -99,6 +104,7 @@ frame_resampler.push(&raw, &mut |frame: &[f32]| {
 ```
 
 With:
+
 ```rust
 frame_resampler.push(&raw, &mut |frame: &[f32]| {
     if !recording {
@@ -291,6 +297,7 @@ cargo test --manifest-path src-tauri/Cargo.toml audio_toolkit::audio::recorder::
 ```
 
 Expected:
+
 ```
 test audio_toolkit::audio::recorder::tests::speech_to_noise_transition_emits_chunk ... ok
 test audio_toolkit::audio::recorder::tests::forced_30s_boundary_emits_chunk ... ok
@@ -315,6 +322,7 @@ git commit -m "feat(recorder): VAD boundary detection dispatches meeting mode se
 ## Task 3: Add `MeetingSegmentEvent` and new fields to `AudioRecordingManager`
 
 **Files:**
+
 - Modify: `src-tauri/src/managers/audio.rs`
 
 - [ ] **Step 1: Add imports**
@@ -371,6 +379,7 @@ transcript_path: Arc::new(Mutex::new(None)),
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
 Expected: no errors.
 
 - [ ] **Step 6: Commit**
@@ -385,6 +394,7 @@ git commit -m "feat(audio): add MeetingSegmentEvent and streaming pipeline field
 ## Task 4: Streaming pipeline in `start_meeting_mode`
 
 **Files:**
+
 - Modify: `src-tauri/src/managers/audio.rs`
 
 - [ ] **Step 1: Add `resolve_transcript_path` helper**
@@ -531,6 +541,7 @@ pub fn start_meeting_mode(&self) -> Result<(), anyhow::Error> {
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
 Expected: no errors (may need to add `use crate::managers::transcription::TranscriptionManager;` at top of audio.rs if the compiler asks).
 
 - [ ] **Step 4: Commit**
@@ -545,6 +556,7 @@ git commit -m "feat(audio): streaming pipeline in start_meeting_mode"
 ## Task 5: Drain and finalize in `stop_meeting_mode`
 
 **Files:**
+
 - Modify: `src-tauri/src/managers/audio.rs`
 
 - [ ] **Step 1: Rewrite `stop_meeting_mode`**
@@ -636,6 +648,7 @@ If the output is empty, the function was only called from `stop_meeting_mode` an
 ```bash
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
+
 Expected: no errors.
 
 - [ ] **Step 4: Run all Rust tests**
@@ -643,6 +656,7 @@ Expected: no errors.
 ```bash
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
+
 Expected: all tests pass, no failures.
 
 - [ ] **Step 5: Commit**
@@ -657,6 +671,7 @@ git commit -m "feat(audio): drain worker and write duration footer in stop_meeti
 ## Task 6: Overlay segment feedback (frontend)
 
 **Files:**
+
 - Modify: `src/overlay/RecordingOverlay.tsx`
 - Modify: `src/overlay/RecordingOverlay.css`
 
@@ -702,9 +717,9 @@ return () => {
 Find the `<div className="overlay-middle">` block. After the closing `</div>` of `overlay-middle` and before `<div className="overlay-right">`, add:
 
 ```tsx
-{lastSegment && (
-  <div className="segment-preview">{lastSegment}</div>
-)}
+{
+  lastSegment && <div className="segment-preview">{lastSegment}</div>;
+}
 ```
 
 This renders outside the 3-column grid, below the existing content.
@@ -734,7 +749,8 @@ Open `src/overlay/RecordingOverlay.css`. Add at the end:
   grid-column: 1 / -1;
   color: #ffffffcc;
   font-size: 10px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   padding: 2px 4px 4px 4px;
   max-width: 160px;
   overflow: hidden;
@@ -744,8 +760,14 @@ Open `src/overlay/RecordingOverlay.css`. Add at the end:
 }
 
 @keyframes segment-fade-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 ```
 
@@ -754,6 +776,7 @@ Open `src/overlay/RecordingOverlay.css`. Add at the end:
 ```bash
 bun run build
 ```
+
 Expected: no TypeScript errors, build succeeds.
 
 - [ ] **Step 7: Commit**

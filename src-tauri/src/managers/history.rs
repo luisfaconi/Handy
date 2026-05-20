@@ -206,7 +206,7 @@ impl HistoryManager {
     }
 
     fn map_history_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
-        let entry_type_str: String = row.get("entry_type").unwrap_or_else(|_| "normal".to_string());
+        let entry_type_str: String = row.get("entry_type")?;
         let entry_type = if entry_type_str == "meeting" {
             EntryType::Meeting
         } else {

@@ -12,6 +12,7 @@ Add progressive (streaming) transcription to Meeting Mode. Instead of waiting un
 ## 1. Problem
 
 In the current Meeting Mode, transcription only happens after the user stops the session — all accumulated audio is sent to the model in one batch. For long meetings this means:
+
 - No feedback that transcription is working until the end
 - A potentially large audio buffer in memory
 - If the app crashes, everything is lost
@@ -44,11 +45,11 @@ Recording and transcription run in parallel — the next chunk is captured while
 
 ### 3.2 Chunk Boundary Conditions
 
-| Condition | Action |
-|---|---|
-| VAD detects silence after voice | Emit accumulated speech buffer as chunk |
-| Buffer reaches ≥ 30s of audio (16 000 × 30 = 480 000 samples) | Force-emit chunk regardless of VAD state |
-| Meeting Mode stopped | Emit any remaining buffered audio as a final chunk |
+| Condition                                                     | Action                                             |
+| ------------------------------------------------------------- | -------------------------------------------------- |
+| VAD detects silence after voice                               | Emit accumulated speech buffer as chunk            |
+| Buffer reaches ≥ 30s of audio (16 000 × 30 = 480 000 samples) | Force-emit chunk regardless of VAD state           |
+| Meeting Mode stopped                                          | Emit any remaining buffered audio as a final chunk |
 
 The 30s ceiling aligns with Whisper's training window and keeps memory bounded.
 
@@ -67,6 +68,7 @@ max_segment_samples: usize,        // = 16_000 * 30
 ```
 
 **Builder method:**
+
 ```rust
 pub fn with_segment_callback(
     mut self,
@@ -76,6 +78,7 @@ pub fn with_segment_callback(
 ```
 
 **Trigger logic (called on each audio frame):**
+
 - When VAD transitions `voice → silence`: call callback with `segment_buffer`, clear buffer.
 - When `segment_buffer.len() >= max_segment_samples`: call callback with buffer, clear buffer (forced boundary).
 - When VAD is `voice`: accumulate samples into `segment_buffer`.
@@ -91,12 +94,14 @@ meeting_worker_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 ```
 
 **`start_meeting_mode` changes:**
+
 1. Create `mpsc::sync_channel::<Vec<f32>>(8)` — bounded to 8 pending chunks to avoid unbounded queuing.
 2. Store `tx` in `meeting_chunk_tx`.
 3. Spawn worker thread (see §4.3).
 4. Register `segment_callback` on the `AudioRecorder` that sends to `tx`.
 
 **`stop_meeting_mode` changes:**
+
 1. Drop `meeting_chunk_tx` (closes the channel sender).
 2. Join `meeting_worker_handle` — waits for worker to drain the queue and finish.
 3. File is already fully written; emit the "Transcript saved" notification as before.
@@ -171,9 +176,11 @@ useEffect(() => {
     "meeting-segment-transcribed",
     (event) => {
       setLastSegment(event.payload.text);
-    }
+    },
   );
-  return () => { unlisten.then(f => f()); };
+  return () => {
+    unlisten.then((f) => f());
+  };
 }, []);
 
 // Auto-clear after 3s
@@ -194,25 +201,25 @@ The `start_meeting_mode` / `stop_meeting_mode` command signatures are unchanged.
 
 ## 6. Error Handling
 
-| Scenario | Behavior |
-|---|---|
-| Worker queue full (8 chunks backed up) | `SyncSender::try_send` returns `Full` — chunk is dropped with a warning log. Prevents memory growth if model is very slow. |
-| Chunk transcription error | Log error, skip segment, continue worker loop |
-| File write fails mid-session | Log error, continue transcription — in-memory accumulator still works; user gets the file path notification with whatever was written |
-| App crash mid-session | All segments written before the crash are already on disk (progressive append) |
-| Meeting stopped with 0 segments | No file written, no notification (unchanged from current behavior) |
+| Scenario                               | Behavior                                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker queue full (8 chunks backed up) | `SyncSender::try_send` returns `Full` — chunk is dropped with a warning log. Prevents memory growth if model is very slow.            |
+| Chunk transcription error              | Log error, skip segment, continue worker loop                                                                                         |
+| File write fails mid-session           | Log error, continue transcription — in-memory accumulator still works; user gets the file path notification with whatever was written |
+| App crash mid-session                  | All segments written before the crash are already on disk (progressive append)                                                        |
+| Meeting stopped with 0 segments        | No file written, no notification (unchanged from current behavior)                                                                    |
 
 ---
 
 ## 7. Files Changed
 
-| File | Type of change |
-|---|---|
+| File                                            | Type of change                                               |
+| ----------------------------------------------- | ------------------------------------------------------------ |
 | `src-tauri/src/audio_toolkit/audio/recorder.rs` | Add `segment_callback`, `segment_buffer`, forced chunk logic |
-| `src-tauri/src/managers/audio.rs` | Worker thread, channel, progressive file write |
-| `src-tauri/src/managers/audio.rs` | New `MeetingSegmentEvent` struct |
-| `src/overlay/RecordingOverlay.tsx` | Listen for event, show last segment with fade |
-| `src/bindings.ts` | Auto-regenerated (new event type via tauri-specta) |
+| `src-tauri/src/managers/audio.rs`               | Worker thread, channel, progressive file write               |
+| `src-tauri/src/managers/audio.rs`               | New `MeetingSegmentEvent` struct                             |
+| `src/overlay/RecordingOverlay.tsx`              | Listen for event, show last segment with fade                |
+| `src/bindings.ts`                               | Auto-regenerated (new event type via tauri-specta)           |
 
 ---
 
