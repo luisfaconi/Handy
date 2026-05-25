@@ -643,6 +643,31 @@ impl AudioRecordingManager {
             .unwrap_or_default();
         let app_handle = self.app_handle.clone();
 
+        // Create a placeholder entry immediately so the history panel shows "starting" status.
+        let placeholder_id: Option<i64> = if let Some(hm) = self
+            .app_handle
+            .try_state::<std::sync::Arc<crate::managers::history::HistoryManager>>()
+        {
+            match hm.save_entry(
+                history_file_name.clone(),
+                String::new(),
+                false,
+                None,
+                None,
+                crate::managers::history::EntryType::Meeting,
+                crate::managers::history::ProcessingStatus::Starting,
+            ) {
+                Ok(entry) => Some(entry.id),
+                Err(e) => {
+                    error!("begin_meeting_segment: failed to create placeholder history entry: {e}");
+                    None
+                }
+            }
+        } else {
+            error!("begin_meeting_segment: HistoryManager not available");
+            None
+        };
+
         // Self-contained worker: holds all per-segment state locally so each PTT
         // cycle is fully independent regardless of when it finishes transcribing.
         let worker = std::thread::spawn(move || {
@@ -664,7 +689,7 @@ impl AudioRecordingManager {
             let mut writer = std::io::BufWriter::new(file);
 
             let mut segments: Vec<(chrono::DateTime<chrono::Local>, String)> = Vec::new();
-            let mut history_entry_id: Option<i64> = None;
+            let mut first_segment = true;
             let mut index: u32 = 0;
 
             while let Ok(chunk) = rx.recv() {
@@ -688,29 +713,20 @@ impl AudioRecordingManager {
                             .join(" ");
 
                         if let Some(hm) = app_handle
-                            .try_state::<Arc<crate::managers::history::HistoryManager>>()
+                            .try_state::<std::sync::Arc<crate::managers::history::HistoryManager>>()
                         {
-                            match history_entry_id {
-                                Some(id) => {
-                                    if let Err(e) = hm.update_transcription(id, full_text, None, None) {
-                                        error!("Meeting mode worker: failed to update history entry: {e}");
-                                    }
+                            if let Some(id) = placeholder_id {
+                                if let Err(e) = hm.update_transcription(id, full_text, None, None) {
+                                    error!("Meeting mode worker: failed to update history entry: {e}");
                                 }
-                                None => {
-                                    match hm.save_entry(
-                                        history_file_name.clone(),
-                                        full_text,
-                                        false,
-                                        None,
-                                        None,
-                                        crate::managers::history::EntryType::Meeting,
-                                        crate::managers::history::ProcessingStatus::Completed,
+                                if first_segment {
+                                    if let Err(e) = hm.update_processing_status(
+                                        id,
+                                        crate::managers::history::ProcessingStatus::Processing,
                                     ) {
-                                        Ok(entry) => { history_entry_id = Some(entry.id); }
-                                        Err(e) => {
-                                            error!("Meeting mode worker: failed to create history entry: {e}");
-                                        }
+                                        error!("Meeting mode worker: failed to set processing status: {e}");
                                     }
+                                    first_segment = false;
                                 }
                             }
                         }
@@ -730,7 +746,7 @@ impl AudioRecordingManager {
                 }
             }
 
-            // Channel closed — write footer and finalize history entry.
+            // Channel closed — write footer and mark entry as completed.
             let end = chrono::Local::now();
             let duration = end.signed_duration_since(start_time);
             let hours = duration.num_hours().abs();
@@ -750,28 +766,17 @@ impl AudioRecordingManager {
                 .join(" ");
 
             if let Some(hm) = app_handle
-                .try_state::<Arc<crate::managers::history::HistoryManager>>()
+                .try_state::<std::sync::Arc<crate::managers::history::HistoryManager>>()
             {
-                match history_entry_id {
-                    Some(id) => {
-                        if let Err(e) = hm.update_transcription(id, full_text, None, None) {
-                            error!("Meeting mode worker: failed to update history entry on stop: {e}");
-                        }
+                if let Some(id) = placeholder_id {
+                    if let Err(e) = hm.update_transcription(id, full_text, None, None) {
+                        error!("Meeting mode worker: failed to update history entry on stop: {e}");
                     }
-                    None => {
-                        if !history_file_name.is_empty() {
-                            if let Err(e) = hm.save_entry(
-                                history_file_name,
-                                full_text,
-                                false,
-                                None,
-                                None,
-                                crate::managers::history::EntryType::Meeting,
-                                crate::managers::history::ProcessingStatus::Completed,
-                            ) {
-                                error!("Meeting mode worker: failed to save history entry on stop: {e}");
-                            }
-                        }
+                    if let Err(e) = hm.update_processing_status(
+                        id,
+                        crate::managers::history::ProcessingStatus::Completed,
+                    ) {
+                        error!("Meeting mode worker: failed to set completed status: {e}");
                     }
                 }
             }
