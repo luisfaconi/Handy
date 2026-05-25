@@ -2,7 +2,7 @@ use crate::audio_toolkit::{list_input_devices, vad::SmoothedVad, AudioRecorder, 
 use crate::helpers::clamshell;
 use crate::settings::{get_settings, AppSettings};
 use crate::utils;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -524,26 +524,16 @@ impl AudioRecordingManager {
                             samples
                         }
                     } else {
-                        // Close the meeting worker channel so Duration is written immediately.
-                        // 1. Drop recorder's tx clone (stops new chunks arriving)
-                        {
-                            let recorder = self.recorder.lock().unwrap();
-                            if let Some(r) = recorder.as_ref() {
-                                r.set_meeting_tx(None);
-                            }
-                        }
-                        // 2. Send last audio chunk + drop manager's tx clone → channel closes → worker writes Duration
-                        {
-                            let mut guard = self.meeting_chunk_tx.lock().unwrap();
-                            if let Some(ref tx) = *guard {
-                                if !samples.is_empty() {
-                                    if let Err(e) = tx.try_send(samples.clone()) {
-                                        warn!("Meeting stop: failed to send final audio chunk: {e}");
-                                    }
+                        // Send final chunk and close channel so worker writes Duration immediately.
+                        let mut guard = self.meeting_chunk_tx.lock().unwrap();
+                        if let Some(ref tx) = *guard {
+                            if !samples.is_empty() {
+                                if let Err(e) = tx.try_send(samples.clone()) {
+                                    warn!("Meeting stop: failed to send final audio chunk: {e}");
                                 }
                             }
-                            *guard = None;
                         }
+                        *guard = None;
                         Vec::new()
                     }
                 };
