@@ -20,8 +20,6 @@ const RecordingOverlay: React.FC = () => {
   const [levels, setLevels] = useState<number[]>(Array(16).fill(0));
   const smoothedLevelsRef = useRef<number[]>(Array(16).fill(0));
   const direction = getLanguageDirection(i18n.language);
-  const [lastSegment, setLastSegment] = useState<string | null>(null);
-  const segmentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const setupEventListeners = async () => {
@@ -37,8 +35,6 @@ const RecordingOverlay: React.FC = () => {
       // Listen for hide-overlay event from Rust
       const unlistenHide = await listen("hide-overlay", () => {
         setIsVisible(false);
-        setLastSegment(null);
-        if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
         commands.setOverlayExpanded(false);
       });
 
@@ -56,29 +52,11 @@ const RecordingOverlay: React.FC = () => {
         setLevels(smoothed.slice(0, 9));
       });
 
-      // Listen for meeting segment transcribed events
-      const unlistenSegment = await listen<{
-        text: string;
-        timestamp: string;
-        index: number;
-      }>("meeting-segment-transcribed", (event) => {
-        // Expand native window first (fire-and-forget) so it's ready when CSS animates
-        commands.setOverlayExpanded(true);
-        setLastSegment(event.payload.text);
-        if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
-        segmentTimerRef.current = setTimeout(() => {
-          setLastSegment(null);
-          commands.setOverlayExpanded(false);
-        }, 3000);
-      });
-
       // Cleanup function
       return () => {
         unlistenShow();
         unlistenHide();
         unlistenLevel();
-        unlistenSegment();
-        if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
       };
     };
 
@@ -104,7 +82,7 @@ const RecordingOverlay: React.FC = () => {
   return (
     <div
       dir={direction}
-      className={`recording-overlay ${isVisible ? "fade-in" : ""} ${isVisible && lastSegment ? "has-segment" : ""}`}
+      className={`recording-overlay ${isVisible ? "fade-in" : ""}`}
     >
       <div className="overlay-left">{getIcon()}</div>
 
@@ -142,12 +120,6 @@ const RecordingOverlay: React.FC = () => {
           >
             <CancelIcon />
           </div>
-        )}
-      </div>
-
-      <div className="overlay-segment">
-        {lastSegment && (
-          <span className="segment-text">{lastSegment}</span>
         )}
       </div>
     </div>
