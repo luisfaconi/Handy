@@ -431,7 +431,12 @@
       "retranscribe": "תמלל מחדש",
       "retranscribeError": "תמלול מחדש נכשל. נסה שוב.",
       "transcribing": "מתמלל...",
-      "transcriptionFailed": "התמלול נכשל. אפשר לתמלל מחדש באמצעות אייקון הניסיון החוזר."
+      "transcriptionFailed": "התמלול נכשל. אפשר לתמלל מחדש באמצעות אייקון הניסיון החוזר.",
+      "status": {
+        "starting": "Starting...",
+        "processing": "Processing...",
+        "completed": "Completed"
+      }
     },
     "debug": {
       "title": "ניפוי שגיאות",

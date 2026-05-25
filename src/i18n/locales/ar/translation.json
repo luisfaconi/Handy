@@ -409,7 +409,12 @@
       "retranscribe": "إعادة النسخ",
       "retranscribeError": "فشلت إعادة النسخ. يرجى المحاولة مرة أخرى.",
       "transcribing": "جارٍ النسخ...",
-      "transcriptionFailed": "فشل النسخ. يمكنك إعادة النسخ باستخدام أيقونة إعادة المحاولة."
+      "transcriptionFailed": "فشل النسخ. يمكنك إعادة النسخ باستخدام أيقونة إعادة المحاولة.",
+      "status": {
+        "starting": "Starting...",
+        "processing": "Processing...",
+        "completed": "Completed"
+      }
     },
     "debug": {
       "title": "تصحيح الأخطاء",

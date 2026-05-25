@@ -432,7 +432,12 @@
       "retranscribeError": "Failed to re-transcribe. Please try again.",
       "transcribing": "Transcribing...",
       "transcriptionFailed": "Transcription failed. You can re-transcribe using the retry icon.",
-      "openTranscript": "Open transcript"
+      "openTranscript": "Open transcript",
+      "status": {
+        "starting": "Starting...",
+        "processing": "Processing...",
+        "completed": "Completed"
+      }
     },
     "debug": {
       "title": "Debug",
