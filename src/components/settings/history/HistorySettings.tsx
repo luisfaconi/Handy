@@ -380,7 +380,7 @@ const MeetingHistoryEntry: React.FC<{
             {formatDateTime(String(entry.timestamp), i18n.language)}
           </p>
           <ProcessingStatusBadge
-            status={(entry.processing_status ?? "completed") as ProcessingStatus}
+            status={entry.processing_status ?? "completed"}
           />
         </div>
         <IconButton onClick={onDelete} title={t("settings.history.delete")}>
