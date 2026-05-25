@@ -704,6 +704,7 @@ impl AudioRecordingManager {
                                         None,
                                         None,
                                         crate::managers::history::EntryType::Meeting,
+                                        crate::managers::history::ProcessingStatus::Completed,
                                     ) {
                                         Ok(entry) => { history_entry_id = Some(entry.id); }
                                         Err(e) => {
@@ -766,6 +767,7 @@ impl AudioRecordingManager {
                                 None,
                                 None,
                                 crate::managers::history::EntryType::Meeting,
+                                crate::managers::history::ProcessingStatus::Completed,
                             ) {
                                 error!("Meeting mode worker: failed to save history entry on stop: {e}");
                             }

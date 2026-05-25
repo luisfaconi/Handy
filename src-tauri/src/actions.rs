@@ -595,6 +595,7 @@ impl ShortcutAction for TranscribeAction {
                                     processed.post_processed_text.clone(),
                                     processed.post_process_prompt.clone(),
                                     crate::managers::history::EntryType::Normal,
+                                    crate::managers::history::ProcessingStatus::Completed,
                                 ) {
                                     error!("Failed to save history entry: {}", err);
                                 }
@@ -640,6 +641,7 @@ impl ShortcutAction for TranscribeAction {
                                     None,
                                     None,
                                     crate::managers::history::EntryType::Normal,
+                                    crate::managers::history::ProcessingStatus::Completed,
                                 ) {
                                     error!("Failed to save failed history entry: {}", save_err);
                                 }

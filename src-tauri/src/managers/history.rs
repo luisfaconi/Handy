@@ -32,6 +32,7 @@ static MIGRATIONS: &[M] = &[
     M::up("ALTER TABLE transcription_history ADD COLUMN post_process_prompt TEXT;"),
     M::up("ALTER TABLE transcription_history ADD COLUMN post_process_requested BOOLEAN NOT NULL DEFAULT 0;"),
     M::up("ALTER TABLE transcription_history ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'normal';"),
+    M::up("ALTER TABLE transcription_history ADD COLUMN processing_status TEXT NOT NULL DEFAULT 'completed';"),
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -39,6 +40,14 @@ static MIGRATIONS: &[M] = &[
 pub enum EntryType {
     Normal,
     Meeting,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessingStatus {
+    Starting,
+    Processing,
+    Completed,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -72,6 +81,7 @@ pub struct HistoryEntry {
     pub post_process_prompt: Option<String>,
     pub post_process_requested: bool,
     pub entry_type: EntryType,
+    pub processing_status: ProcessingStatus,
 }
 
 pub struct HistoryManager {
@@ -212,6 +222,12 @@ impl HistoryManager {
         } else {
             EntryType::Normal
         };
+        let processing_status_str: String = row.get("processing_status")?;
+        let processing_status = match processing_status_str.as_str() {
+            "starting" => ProcessingStatus::Starting,
+            "processing" => ProcessingStatus::Processing,
+            _ => ProcessingStatus::Completed,
+        };
         Ok(HistoryEntry {
             id: row.get("id")?,
             file_name: row.get("file_name")?,
@@ -223,6 +239,7 @@ impl HistoryManager {
             post_process_prompt: row.get("post_process_prompt")?,
             post_process_requested: row.get("post_process_requested")?,
             entry_type,
+            processing_status,
         })
     }
 
@@ -240,6 +257,7 @@ impl HistoryManager {
         post_processed_text: Option<String>,
         post_process_prompt: Option<String>,
         entry_type: EntryType,
+        processing_status: ProcessingStatus,
     ) -> Result<HistoryEntry> {
         let timestamp = Utc::now().timestamp();
         let title = self.format_timestamp_title(timestamp);
@@ -255,8 +273,9 @@ impl HistoryManager {
                 post_processed_text,
                 post_process_prompt,
                 post_process_requested,
-                entry_type
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                entry_type,
+                processing_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 &file_name,
                 timestamp,
@@ -267,6 +286,11 @@ impl HistoryManager {
                 &post_process_prompt,
                 post_process_requested,
                 if entry_type == EntryType::Meeting { "meeting" } else { "normal" },
+                match processing_status {
+                    ProcessingStatus::Starting => "starting",
+                    ProcessingStatus::Processing => "processing",
+                    ProcessingStatus::Completed => "completed",
+                },
             ],
         )?;
 
@@ -281,6 +305,7 @@ impl HistoryManager {
             post_process_prompt,
             post_process_requested,
             entry_type,
+            processing_status,
         };
 
         debug!("Saved history entry with id {}", entry.id);
@@ -327,7 +352,7 @@ impl HistoryManager {
 
         let entry = conn
             .query_row(
-                "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, entry_type
+                "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, entry_type, processing_status
                  FROM transcription_history WHERE id = ?1",
                 params![id],
                 Self::map_history_entry,
@@ -344,6 +369,46 @@ impl HistoryManager {
         }
 
         Ok(entry)
+    }
+
+    pub fn update_processing_status(&self, id: i64, status: ProcessingStatus) -> Result<()> {
+        let conn = self.get_connection()?;
+        let updated = conn.execute(
+            "UPDATE transcription_history SET processing_status = ?1 WHERE id = ?2",
+            params![
+                match status {
+                    ProcessingStatus::Starting => "starting",
+                    ProcessingStatus::Processing => "processing",
+                    ProcessingStatus::Completed => "completed",
+                },
+                id
+            ],
+        )?;
+
+        if updated == 0 {
+            return Err(anyhow!("History entry {} not found", id));
+        }
+
+        let entry = conn.query_row(
+            "SELECT id, file_name, timestamp, saved, title, transcription_text,
+                    post_processed_text, post_process_prompt, post_process_requested,
+                    entry_type, processing_status
+             FROM transcription_history WHERE id = ?1",
+            params![id],
+            Self::map_history_entry,
+        )?;
+
+        debug!("Updated processing_status for history entry {} to {:?}", id, entry.processing_status);
+
+        if let Err(e) = (HistoryUpdatePayload::Updated {
+            entry,
+        })
+        .emit(&self.app_handle)
+        {
+            error!("Failed to emit history-updated event: {}", e);
+        }
+
+        Ok(())
     }
 
     pub fn cleanup_old_entries(&self) -> Result<()> {
@@ -478,7 +543,7 @@ impl HistoryManager {
             (Some(cursor_id), Some(lim)) => {
                 let fetch_count = (lim + 1) as i64;
                 let mut stmt = conn.prepare(
-                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, entry_type
+                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, entry_type, processing_status
                      FROM transcription_history
                      WHERE id < ?1
                      ORDER BY id DESC
@@ -492,7 +557,7 @@ impl HistoryManager {
             (None, Some(lim)) => {
                 let fetch_count = (lim + 1) as i64;
                 let mut stmt = conn.prepare(
-                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, entry_type
+                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, entry_type, processing_status
                      FROM transcription_history
                      ORDER BY id DESC
                      LIMIT ?1",
@@ -504,7 +569,7 @@ impl HistoryManager {
             }
             (_, None) => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, entry_type
+                    "SELECT id, file_name, timestamp, saved, title, transcription_text, post_processed_text, post_process_prompt, post_process_requested, entry_type, processing_status
                      FROM transcription_history
                      ORDER BY id DESC",
                 )?;
@@ -536,7 +601,8 @@ impl HistoryManager {
                 post_processed_text,
                 post_process_prompt,
                 post_process_requested,
-                entry_type
+                entry_type,
+                processing_status
              FROM transcription_history
              ORDER BY timestamp DESC
              LIMIT 1",
@@ -564,7 +630,8 @@ impl HistoryManager {
                 post_processed_text,
                 post_process_prompt,
                 post_process_requested,
-                entry_type
+                entry_type,
+                processing_status
              FROM transcription_history
              WHERE transcription_text != ''
              ORDER BY timestamp DESC
@@ -619,7 +686,8 @@ impl HistoryManager {
                 post_processed_text,
                 post_process_prompt,
                 post_process_requested,
-                entry_type
+                entry_type,
+                processing_status
              FROM transcription_history
              WHERE id = ?1",
         )?;
@@ -689,7 +757,8 @@ mod tests {
                 post_processed_text TEXT,
                 post_process_prompt TEXT,
                 post_process_requested BOOLEAN NOT NULL DEFAULT 0,
-                entry_type TEXT NOT NULL DEFAULT 'normal'
+                entry_type TEXT NOT NULL DEFAULT 'normal',
+                processing_status TEXT NOT NULL DEFAULT 'completed'
             );",
         )
         .expect("create transcription_history table");
@@ -707,8 +776,9 @@ mod tests {
                 post_processed_text,
                 post_process_prompt,
                 post_process_requested,
-                entry_type
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                entry_type,
+                processing_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 format!("handy-{}.wav", timestamp),
                 timestamp,
@@ -719,6 +789,7 @@ mod tests {
                 Option::<String>::None,
                 false,
                 "normal",
+                "completed",
             ],
         )
         .expect("insert history entry");
@@ -785,5 +856,33 @@ mod tests {
             .unwrap();
 
         assert_eq!(entry.entry_type, EntryType::Meeting);
+    }
+
+    #[test]
+    fn processing_status_round_trips() {
+        let conn = setup_conn();
+        conn.execute(
+            "INSERT INTO transcription_history (
+                file_name, timestamp, saved, title,
+                transcription_text, post_process_requested, entry_type, processing_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "meeting_2026-05-25.txt",
+                100i64,
+                false,
+                "May 25, 2026",
+                "hello",
+                false,
+                "meeting",
+                "starting",
+            ],
+        )
+        .unwrap();
+
+        let entry = HistoryManager::get_latest_entry_with_conn(&conn)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(entry.processing_status, ProcessingStatus::Starting);
     }
 }
