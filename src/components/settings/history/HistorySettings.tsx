@@ -311,6 +311,39 @@ export const HistorySettings: React.FC = () => {
   );
 };
 
+type ProcessingStatus = "starting" | "processing" | "completed";
+
+const ProcessingStatusBadge: React.FC<{ status: ProcessingStatus }> = ({
+  status,
+}) => {
+  const { t } = useTranslation();
+
+  if (status === "starting") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+        {t("settings.history.status.starting")}
+      </span>
+    );
+  }
+
+  if (status === "processing") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+        {t("settings.history.status.processing")}
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+      {t("settings.history.status.completed")}
+    </span>
+  );
+};
+
 const MeetingHistoryEntry: React.FC<{
   entry: HistoryEntry;
   onDelete: () => void;
@@ -342,9 +375,14 @@ const MeetingHistoryEntry: React.FC<{
   return (
     <div className="px-4 py-2 pb-4 flex flex-col gap-2">
       <div className="flex justify-between items-center">
-        <p className="text-sm font-medium">
-          {formatDateTime(String(entry.timestamp), i18n.language)}
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">
+            {formatDateTime(String(entry.timestamp), i18n.language)}
+          </p>
+          <ProcessingStatusBadge
+            status={(entry.processing_status ?? "completed") as ProcessingStatus}
+          />
+        </div>
         <IconButton onClick={onDelete} title={t("settings.history.delete")}>
           <Trash2 width={16} height={16} />
         </IconButton>
